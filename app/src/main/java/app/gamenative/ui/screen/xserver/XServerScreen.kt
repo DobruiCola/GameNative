@@ -3155,6 +3155,21 @@ private fun getWineStartCommand(
             return "\"explorer.exe\""
         }
 
+        // Install EOS overlay into this container if not already present
+        if (!EpicService.isOverlayInstalled(container)) {
+            Timber.tag("XServerScreen").i("[Overlay] EOS overlay not installed, installing now...")
+            runBlocking {
+                val overlayResult = EpicService.installOverlay(context, container)
+                if (overlayResult.isSuccess) {
+                    Timber.tag("XServerScreen").i("[Overlay] EOS overlay installed successfully")
+                } else {
+                    Timber.tag("XServerScreen").w("[Overlay] EOS overlay install failed: ${overlayResult.exceptionOrNull()?.message} — launching anyway")
+                }
+            }
+        } else {
+            Timber.tag("XServerScreen").d("[Overlay] EOS overlay already installed, skipping")
+        }
+
         // Use container's configured executable path if available, otherwise auto-detect and persist
         val exePath = if (container.executablePath.isNotEmpty()) {
             container.executablePath

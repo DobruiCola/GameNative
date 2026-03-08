@@ -390,6 +390,83 @@ class EpicDownloadManager @Inject constructor(
     }
 
     /**
+     * Download the Epic Online Services overlay 
+     */
+    suspend fun downloadOverlay(
+        manifestResult: EpicManager.ManifestResult,
+        installPath: String,
+        onProgress: ((Int, Int) -> Unit)? = null,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            // Filter out Cloudflare CDN (consistent with game downloads)
+            val cdnUrls = manifestResult.cdnUrls.filter {
+                !it.baseUrl.startsWith("https://cloudflare.epicgamescdn.com")
+            }
+            if (cdnUrls.isEmpty()) {
+                return@withContext Result.failure(Exception("No usable CDN URLs in manifest"))
+            }
+
+            val manifest = EpicManifest.readAll(manifestResult.manifestBytes)
+            val chunks = manifest.chunkDataList?.elements
+                ?: return@withContext Result.failure(Exception("Manifest contains no chunk data"))
+            val files = manifest.fileManifestList?.elements
+                ?: return@withContext Result.failure(Exception("Manifest contains no file list"))
+            val chunkDir = manifest.getChunkDir()
+
+            val installDir = File(installPath).also { it.mkdirs() }
+            val chunkCacheDir = File(installDir, ".chunks").also { it.mkdirs() }
+
+            // Dummy DownloadInfo – overlay downloads are small and need no UI progress events
+            val dummyDownloadInfo = DownloadInfo(
+                jobCount = 1,
+                gameId = -1,
+                downloadingAppIds = java.util.concurrent.CopyOnWriteArrayList(),
+            )
+
+            var downloadedChunks = 0
+            val totalChunks = chunks.size
+
+            chunks.chunked(MAX_PARALLEL_DOWNLOADS).forEach { batch ->
+                val results = batch.map { chunk ->
+                    async {
+                        downloadChunkWithRetry(chunk, chunkCacheDir, chunkDir, cdnUrls, dummyDownloadInfo)
+                    }
+                }.awaitAll()
+
+                results.firstOrNull { it.isFailure }?.let { failure ->
+                    chunkCacheDir.deleteRecursively()
+                    return@withContext Result.failure(
+                        failure.exceptionOrNull() ?: Exception("Chunk download failed"),
+                    )
+                }
+
+                downloadedChunks += batch.size
+                onProgress?.invoke(downloadedChunks, totalChunks)
+            }
+
+            files.chunked(4).forEach { batch ->
+                val results = batch.map { fileManifest ->
+                    async { assembleFile(fileManifest, chunkCacheDir, installDir) }
+                }.awaitAll()
+
+                results.firstOrNull { it.isFailure }?.let { failure ->
+                    chunkCacheDir.deleteRecursively()
+                    return@withContext Result.failure(
+                        failure.exceptionOrNull() ?: Exception("File assembly failed"),
+                    )
+                }
+            }
+
+            chunkCacheDir.deleteRecursively()
+            Timber.tag("Epic").i("downloadOverlay completed: $installPath")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Timber.tag("Epic").e(e, "downloadOverlay failed for $installPath")
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Download a single chunk with retry logic
      */
     private suspend fun downloadChunkWithRetry(
