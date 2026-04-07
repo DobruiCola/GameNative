@@ -27,14 +27,19 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.gamenative.R
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.theme.BrandGradient
-import kotlin.math.sin
+import com.skydoves.landscapist.ImageOptions
+import com.skydoves.landscapist.coil.CoilImage
 import kotlin.random.Random
 import kotlinx.coroutines.delay
 
@@ -43,6 +48,7 @@ fun BootingSplash(
     visible: Boolean = true,
     text: String = "Initializing...",
     progress: Float = -1f, // -1 for indeterminate, 0-1 for determinate
+    heroImageUrl: String = "",
 ) {
     // Tips rotation (no animation cost, safe outside visibility check)
     val tips = remember {
@@ -121,31 +127,70 @@ fun BootingSplash(
             label = "shimmer",
         )
 
-        val particlePhase by infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 360f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(20000, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "particlePhase",
-        )
-
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.background,
-                            PluviaTheme.colors.surfacePanel,
-                            MaterialTheme.colorScheme.background,
-                        ),
-                    ),
-                ),
+            modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
-            AmbientParticles(phase = particlePhase)
+            if (heroImageUrl.isNotEmpty()) {
+                CoilImage(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = 1.06f
+                            scaleY = 1.06f
+                        }
+                        .blur(3.dp),
+                    imageModel = { heroImageUrl },
+                    imageOptions = ImageOptions(
+                        contentScale = ContentScale.Crop,
+                        contentDescription = null,
+                    ),
+                    loading = {},
+                    failure = {},
+                    previewPlaceholder = painterResource(R.drawable.ic_logo_color),
+                )
+            }
+
+            // Dark overlay — heavier than the carousel to keep text readable
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = if (heroImageUrl.isNotEmpty()) 0.55f else 0.85f)),
+            )
+
+            // Vertical vignette (mirrors carousel backdrop)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.0f to Color.Black.copy(alpha = 0.74f),
+                                0.16f to Color.Black.copy(alpha = 0.52f),
+                                0.38f to Color.Black.copy(alpha = 0.24f),
+                                0.62f to Color.Black.copy(alpha = 0.34f),
+                                1.0f to Color.Black.copy(alpha = 0.72f),
+                            ),
+                        ),
+                    ),
+            )
+
+            // Horizontal vignette (mirrors carousel backdrop)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.horizontalGradient(
+                            colorStops = arrayOf(
+                                0.0f to Color.Black.copy(alpha = 0.34f),
+                                0.14f to Color.Black.copy(alpha = 0.16f),
+                                0.5f to Color.Transparent,
+                                0.86f to Color.Black.copy(alpha = 0.16f),
+                                1.0f to Color.Black.copy(alpha = 0.34f),
+                            ),
+                        ),
+                    ),
+            )
 
             // Main content
             Column(
@@ -303,55 +348,6 @@ private fun ProgressBar(
     }
 }
 
-@Composable
-private fun AmbientParticles(
-    phase: Float,
-    modifier: Modifier = Modifier,
-) {
-    val particleColor = PluviaTheme.colors.accentCyan
-
-    val particles = remember {
-        List(12) {
-            ParticleData(
-                baseX = Random.nextFloat(),
-                baseY = Random.nextFloat(),
-                size = Random.nextFloat() * 3f + 1f,
-                speed = Random.nextFloat() * 0.5f + 0.5f,
-                phaseOffset = Random.nextFloat() * 360f,
-            )
-        }
-    }
-
-    Canvas(modifier = modifier.fillMaxSize()) {
-        particles.forEach { particle ->
-            val animatedPhase = (phase + particle.phaseOffset) * particle.speed
-            val radians = Math.toRadians(animatedPhase.toDouble())
-
-            val offsetX = (sin(radians) * 30).toFloat()
-            val offsetY = (sin(radians * 0.7) * 20).toFloat()
-
-            val x = particle.baseX * size.width + offsetX
-            val y = particle.baseY * size.height + offsetY
-
-            // Pulsing alpha based on phase
-            val alpha = (0.15f + 0.15f * sin(radians * 2).toFloat()).coerceIn(0f, 0.3f)
-
-            drawCircle(
-                color = particleColor.copy(alpha = alpha),
-                radius = particle.size.dp.toPx(),
-                center = Offset(x, y),
-            )
-        }
-    }
-}
-
-private data class ParticleData(
-    val baseX: Float,
-    val baseY: Float,
-    val size: Float,
-    val speed: Float,
-    val phaseOffset: Float,
-)
 
 @Preview(name = "BootingSplash - Indeterminate")
 @Composable
