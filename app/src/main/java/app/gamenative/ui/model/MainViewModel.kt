@@ -480,7 +480,9 @@ class MainViewModel @Inject constructor(
                     if (folderPath != null) {
                         val folder = java.io.File(folderPath)
                         val heroFile = folder.listFiles()?.firstOrNull { file ->
-                            file.isFile && file.name.startsWith("steamgriddb_grid_hero", ignoreCase = true) &&
+                            file.isFile && 
+                                file.name.startsWith("steamgriddb_hero", ignoreCase = true) &&
+                                !file.name.contains("grid_", ignoreCase = true) &&
                                 (file.name.endsWith(".png", ignoreCase = true) ||
                                     file.name.endsWith(".jpg", ignoreCase = true) ||
                                     file.name.endsWith(".webp", ignoreCase = true))
