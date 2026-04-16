@@ -904,6 +904,8 @@
     <string name="settings_info_libraries_subtitle">Descubre qué tecnologías hacen posible GameNative.</string>
     <string name="settings_info_privacy_title">Política de privacidad</string>
     <string name="settings_info_privacy_subtitle">Abre un enlace a la política de privacidad de GameNative.</string>
+    <string name="settings_info_usage_analytics_title">Análisis de uso</string>
+    <string name="settings_info_usage_analytics_subtitle">Nunca rastreamos información personal. Al desactivar esto se detienen los análisis no esenciales, sin embargo los datos de rendimiento de juegos se siguen recopilando como interés legítimo para mejorar la compatibilidad.</string>
 
     <!-- Settings: Interface Group -->
     <string name="settings_interface_title">Interfaz</string>

@@ -55,7 +55,7 @@ internal fun LibraryDetailPane(
             }
             LaunchedEffect(libraryItem.recommendedGameId) {
                 game = RecommendationRepository.getCurrentRecommendation(context)
-                if (game != null) {
+                if (game != null && PrefManager.usageAnalyticsEnabled) {
                     PostHog.capture(
                         event = "recommendation_opened",
                         properties = mapOf(

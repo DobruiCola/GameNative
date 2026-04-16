@@ -855,6 +855,8 @@
     <string name="settings_info_libraries_subtitle">Welche Technologien GameNative möglich machen</string>
     <string name="settings_info_privacy_title">Datenschutzerklärung</string>
     <string name="settings_info_privacy_subtitle">Öffnet die Datenschutzerklärung von GameNative</string>
+    <string name="settings_info_usage_analytics_title">Nutzungsanalysen</string>
+    <string name="settings_info_usage_analytics_subtitle">Wir erfassen niemals persönliche Daten. Durch Deaktivierung werden nicht wesentliche Analysen gestoppt, jedoch werden grundlegende Spiel-Performance-Daten weiterhin als berechtigtes Interesse zur Verbesserung der Kompatibilität erfasst.</string>
     <!-- Settings: Interface Group -->
     <string name="settings_interface_title">Oberfläche</string>
     <string name="settings_interface_external_links_title">Weblinks extern öffnen</string>

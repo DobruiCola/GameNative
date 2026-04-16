@@ -895,6 +895,8 @@
 	<string name="settings_info_libraries_subtitle">Vezi tehnologiile care fac GameNative posibil</string>
 	<string name="settings_info_privacy_title">Politica de confidențialitate</string>
 	<string name="settings_info_privacy_subtitle">Deschide linkul către politica de confidențialitate GameNative</string>
+	<string name="settings_info_usage_analytics_title">Analiză utilizare</string>
+	<string name="settings_info_usage_analytics_subtitle">Nu urmărim niciodată informații personale. Dezactivarea oprește analizele neesențiale, însă datele de bază privind performanța jocurilor sunt în continuare colectate ca interes legitim pentru a îmbunătăți compatibilitatea.</string>
 
 	<!-- Settings: Interface Group -->
 	<string name="settings_interface_title">Interfață</string>

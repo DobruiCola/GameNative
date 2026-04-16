@@ -887,6 +887,8 @@
     <string name="settings_info_libraries_subtitle">了解哪些技術讓GameNative成為可能</string>
     <string name="settings_info_privacy_title">隱私權政策</string>
     <string name="settings_info_privacy_subtitle">開啟連結至 GameNative 的隱私權政策</string>
+    <string name="settings_info_usage_analytics_title">使用分析</string>
+    <string name="settings_info_usage_analytics_subtitle">我們絕不追蹤個人資訊。關閉此選項將停止非必要的分析，但核心遊戲效能資料仍會作為合法權益繼續收集，以改善相容性。</string>
 
     <!-- Settings: Interface Group -->
     <string name="settings_interface_title">介面</string>

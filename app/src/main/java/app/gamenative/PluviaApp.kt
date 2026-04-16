@@ -105,12 +105,14 @@ class PluviaApp : SplitCompatApplication() {
         }
         PostHogAndroid.setup(this, postHogConfig)
 
-        com.posthog.PostHog.capture(
-            event = "\$set",
-            properties = mapOf(
-                "\$set" to mapOf("recommendation_enabled" to PrefManager.showRecommendations),
-            ),
-        )
+        if (PrefManager.usageAnalyticsEnabled) {
+            com.posthog.PostHog.capture(
+                event = "\$set",
+                properties = mapOf(
+                    "\$set" to mapOf("recommendation_enabled" to PrefManager.showRecommendations),
+                ),
+            )
+        }
 
         PlayIntegrity.warmUp(this)
 
