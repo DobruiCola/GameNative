@@ -1,0 +1,71 @@
+name: PR label command
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  label:
+    if: github.event.issue.pull_request != null
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Apply labels from /label command
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const body = context.payload.comment.body.trim()
+
+            if (!body.startsWith('/label ')) {
+              core.info('Not a /label command')
+              return
+            }
+
+            const allowed = new Set([
+              'bug',
+              'android',
+              'graphics',
+              'infra',
+              'ui',
+              'docs',
+              'enhancement',
+              'easy-fix',
+              'needs-review',
+            ])
+
+            const requested = body
+              .slice('/label '.length)
+              .split(/[,\s]+/)
+              .map(s => s.trim())
+              .filter(Boolean)
+
+            const labels = requested.filter(label => allowed.has(label))
+
+            if (labels.length === 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: 'No valid labels found. Allowed labels: ' + [...allowed].join(', ')
+              })
+              return
+            }
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels
+            })
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: 'Applied labels: ' + labels.map(l => `\`${l}\``).join(', ')
+            })
