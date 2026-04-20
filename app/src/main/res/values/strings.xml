@@ -1160,6 +1160,11 @@
     <string name="best_config_applied_with_defaults">Config applied with missing components replaced by defaults</string>
     <string name="import_config">Import config</string>
     <string name="export_config">Export config</string>
+    <string name="steam_save_export_success">Saves exported</string>
+    <string name="steam_save_export_no_saves_found">No save files found</string>
+    <string name="steam_save_export_failed">Failed to export saves: %s</string>
+    <string name="steam_save_import_success">Saves imported</string>
+    <string name="steam_save_import_failed">Failed to import saves: %s</string>
     <string name="library_app_type">App Type</string>
     <string name="library_app_status">App Status</string>
     <string name="library_layout">Layout</string>
@@ -1401,6 +1406,30 @@
     <string name="workshop_failed_count">%1$d workshop mod(s) failed to update</string>
     <string name="workshop_download_failed">Download failed</string>
 
+    <!-- App option menu labels -->
+    <string name="option_open_store_page">Open store page</string>
+    <string name="option_export_for_frontend">Export for frontend</string>
+    <string name="option_open_container">Open container</string>
+    <string name="option_edit_container">Edit container</string>
+    <string name="option_reset_to_defaults">Reset container</string>
+    <string name="option_get_support">Get support</string>
+    <string name="option_submit_feedback">Submit feedback</string>
+    <string name="option_reset_drm">Reset DRM</string>
+    <string name="option_use_known_config">Use known config</string>
+    <string name="option_import_saves">Import saves</string>
+    <string name="option_export_saves">Export saves</string>
+    <string name="option_verify_files">Verify files</string>
+    <string name="option_update">Update</string>
+    <string name="option_move_to_external_storage">Move to external storage</string>
+    <string name="option_move_to_internal_storage">Move to internal storage</string>
+    <string name="option_force_cloud_sync">Force cloud sync</string>
+    <string name="option_browse_online_saves">Browse online saves</string>
+    <string name="option_force_download_remote">Force download remote saves</string>
+    <string name="option_force_upload_local">Force upload local saves</string>
+    <string name="option_fetch_game_images">Fetch game images</string>
+    <string name="option_test_graphics">Test graphics</string>
+    <string name="option_manage_dlc">Manage DLC</string>
+    <string name="option_manage_workshop">Manage Workshop</string>
     <!-- Recommendations -->
     <string name="recommended_badge">Recommended</string>
     <string name="recommended_buy_button">Check It Out</string>
