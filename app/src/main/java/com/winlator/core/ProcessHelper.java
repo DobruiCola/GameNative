@@ -37,9 +37,48 @@ public abstract class ProcessHelper {
 //        Log.d("ProcessHelper", "Process terminated with pid: " + pid);
     }
 
+    public static void killProcess(int pid) {
+        Process.sendSignal(pid, SIGKILL);
+    }
+
     public static void terminateAllWineProcesses() {
         for (String process : listRunningWineProcesses()) {
             terminateProcess(Integer.parseInt(process));
+        }
+    }
+
+    public static void killAllWineProcesses() {
+        for (String process : listRunningWineProcesses()) {
+            killProcess(Integer.parseInt(process));
+        }
+    }
+
+    public static void hardKillStaleWineProcesses() throws InterruptedException {
+        long deadlineMs = System.currentTimeMillis() + 5000;
+        List<String> stalePids = listRunningWineProcesses();
+
+        if (stalePids.isEmpty()) {
+            return;
+        }
+
+        Log.w("ProcessHelper", String.format(
+            "Found %d stale Wine process(es) before launch; hard-killing: %s",
+            stalePids.size(), String.join(", ", stalePids)));
+
+        killAllWineProcesses();
+
+        List<String> remaining;
+        do {
+            Thread.sleep(100);
+            remaining = listRunningWineProcesses();
+        } while (!remaining.isEmpty() && System.currentTimeMillis() < deadlineMs);
+
+        if (!remaining.isEmpty()) {
+            Log.w("ProcessHelper", String.format(
+                "Wine processes still present after hard-kill: %s",
+                String.join(", ", remaining)));
+            throw new IllegalStateException(
+                "Wine processes still present after hard-kill attempt: " + String.join(", ", remaining));
         }
     }
 

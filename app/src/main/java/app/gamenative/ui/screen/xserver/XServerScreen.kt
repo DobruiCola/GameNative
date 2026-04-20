@@ -2606,6 +2606,7 @@ private fun shiftXEnvironmentToContext(
 
     return environment
 }
+
 private fun setupXEnvironment(
     context: Context,
     appId: String,
@@ -2623,6 +2624,8 @@ private fun setupXEnvironment(
     onGameLaunchError: ((String) -> Unit)? = null,
     navigateBack: () -> Unit,
 ): XEnvironment {
+    ProcessHelper.hardKillStaleWineProcesses()
+
     val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
     val lc_all = container!!.lC_ALL
     val imageFs = ImageFs.find(context)
