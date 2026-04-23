@@ -42,6 +42,8 @@ Join our [Discord server](https://discord.gg/2hKv4VfZfE) for support and updates
 ## License
 [GPL 3.0](https://github.com/utkarshdalal/GameNative/blob/master/LICENSE)
 
+See [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for attributions, copyleft source offers, and notices about third-party and proprietary components bundled with the application.
+
 ## Analytics & Privacy
 
 GameNative uses [PostHog](https://posthog.com) for anonymous analytics. No personal information is ever collected — no names, emails, IPs, or device identifiers.
