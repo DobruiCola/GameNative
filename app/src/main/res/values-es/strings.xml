@@ -1400,4 +1400,10 @@
      <string name="steam_save_import_failed">Error al importar partidas: %s</string>
     <string name="option_import_saves">Importar partidas guardadas</string>
     <string name="option_export_saves">Exportar partidas guardadas</string>
+    <!-- HLTB (How Long To Beat) -->
+    <string name="hltb_main_story">Historia principal</string>
+    <string name="hltb_main_plus_extras">Principal + Extras</string>
+    <string name="hltb_completionist">Completista</string>
+    <string name="hltb_all_styles">Todos los estilos</string>
+    <string name="hltb_view_on_hltb">Ver en HowLongToBeat</string>
 </resources>

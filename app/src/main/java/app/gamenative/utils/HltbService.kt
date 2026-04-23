@@ -30,6 +30,9 @@ object HltbService {
     private const val UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36"
 
+    /** Base URL for a game's HLTB page; append the numeric game ID to form the full URL. */
+    const val GAME_URL = "https://howlongtobeat.com/game/"
+
     @Serializable
     data class Stats(
         val mainHours: String,
@@ -113,25 +116,32 @@ object HltbService {
                     ?: return@withContext null
                 if (data.length() == 0) return@withContext null
 
-            // Pick best match (exact name first, then closest by edit distance)
-            val norm = normalize(name)
-            var best = data.getJSONObject(0)
-            var bestDist = Int.MAX_VALUE
-            for (i in 0 until data.length()) {
-                val item = data.getJSONObject(i)
-                val d = levenshtein(norm, normalize(item.optString("game_name")))
-                if (d < bestDist) { bestDist = d; best = item }
-                if (d == 0) break
-            }
+                // Pick best match (exact name first, then closest by edit distance)
+                val norm = normalize(name)
+                var bestMatch = data.getJSONObject(0)
+                var bestDist = Int.MAX_VALUE
+                for (i in 0 until data.length()) {
+                    val candidate = data.getJSONObject(i)
+                    val dist = levenshtein(norm, normalize(candidate.optString("game_name")))
+                    if (dist < bestDist) { bestDist = dist; bestMatch = candidate }
+                    if (dist == 0) break
+                }
 
-                val g = best
-                Timber.tag("HLTB").i("'$name' → '${g.optString("game_name")}' main=${g.optLong("comp_main")}s")
+                // Reject poor fuzzy matches — avoids surfacing unrelated stub entries
+                val distanceThreshold = maxOf(3, norm.length / 2)
+                if (bestDist > distanceThreshold) return@withContext null
+
+                // Skip entries with no completion data — don't poison the cache with placeholders
+                if (listOf("comp_main", "comp_plus", "comp_100", "comp_all")
+                        .all { bestMatch.optLong(it) == 0L }) return@withContext null
+
+                Timber.tag("HLTB").i("'$name' → '${bestMatch.optString("game_name")}' main=${bestMatch.optLong("comp_main")}s")
                 Stats(
-                    mainHours = secs(g.optLong("comp_main")),
-                    mainPlusHours = secs(g.optLong("comp_plus")),
-                    completeHours = secs(g.optLong("comp_100")),
-                    allStylesHours = secs(g.optLong("comp_all")),
-                    gameId = g.optInt("game_id", 0),
+                    mainHours = secs(bestMatch.optLong("comp_main")),
+                    mainPlusHours = secs(bestMatch.optLong("comp_plus")),
+                    completeHours = secs(bestMatch.optLong("comp_100")),
+                    allStylesHours = secs(bestMatch.optLong("comp_all")),
+                    gameId = bestMatch.optInt("game_id", 0),
                 )
             } finally {
                 conn.disconnect()
@@ -152,22 +162,24 @@ object HltbService {
         stats
     }
 
-    private fun secs(s: Long) = if (s <= 0) "--" else "%.1f".format(s / 3600.0)
-    private fun normalize(s: String) =
+    internal fun secs(s: Long) = if (s <= 0) "--" else "%.1f".format(s / 3600.0)
+    internal fun normalize(s: String) =
         s.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), " ").replace(Regex("\\s+"), " ").trim()
-    private fun levenshtein(a: String, b: String): Int {
+    internal fun levenshtein(a: String, b: String): Int {
         if (a == b) return 0
-        val dp = Array(a.length + 1) { IntArray(b.length + 1) { it } }
-        for (j in 1..b.length) dp[0][j] = j
+        val dp = Array(a.length + 1) { IntArray(b.length + 1) }
+        for (i in 0..a.length) dp[i][0] = i
+        for (j in 0..b.length) dp[0][j] = j
         for (i in 1..a.length) for (j in 1..b.length)
             dp[i][j] = minOf(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+(if (a[i-1]==b[j-1]) 0 else 1))
         return dp[a.length][b.length]
     }
 }
 
-/** In-memory + DataStore cache for HLTB stats (12-hour TTL). */
+/** In-memory + DataStore cache for HLTB stats (12-hour TTL, max 200 entries). */
 object HltbCache {
     private const val TTL = 12 * 3_600_000L
+    internal const val MAX_ENTRIES = 200
     private val mem = mutableMapOf<String, HltbService.Stats>()
     private val stamps = mutableMapOf<String, Long>()
     private var loaded = false
@@ -175,19 +187,24 @@ object HltbCache {
 
     @Serializable data class Entry(val stats: HltbService.Stats, val ts: Long)
 
+    @Synchronized
     private fun load() {
         if (loaded) return
-        loaded = true
         try {
             val raw = PrefManager.hltbCache
-            if (raw == "{}") return
-            val now = System.currentTimeMillis()
-            json.decodeFromString<Map<String, Entry>>(raw).forEach { (k, e) ->
-                if (now - e.ts < TTL) { mem[k] = e.stats; stamps[k] = e.ts }
+            if (raw != "{}") {
+                val now = System.currentTimeMillis()
+                json.decodeFromString<Map<String, Entry>>(raw).forEach { (k, e) ->
+                    if (now - e.ts < TTL) { mem[k] = e.stats; stamps[k] = e.ts }
+                }
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        } finally {
+            loaded = true
+        }
     }
 
+    @Synchronized
     private fun save() {
         try {
             val now = System.currentTimeMillis()
@@ -195,6 +212,7 @@ object HltbCache {
         } catch (_: Exception) {}
     }
 
+    @Synchronized
     fun get(name: String): HltbService.Stats? {
         load()
         val k = key(name)
@@ -203,11 +221,23 @@ object HltbCache {
         return mem[k]
     }
 
+    @Synchronized
     fun put(name: String, stats: HltbService.Stats) {
-        load(); val k = key(name)
-        mem[k] = stats; stamps[k] = System.currentTimeMillis(); save()
+        load()
+        val k = key(name)
+        if (mem.size >= MAX_ENTRIES && !mem.containsKey(k)) {
+            // Evict the oldest entry to stay within memory budget
+            stamps.minByOrNull { it.value }?.key?.let { oldest -> mem.remove(oldest); stamps.remove(oldest) }
+        }
+        mem[k] = stats
+        stamps[k] = System.currentTimeMillis()
+        save()
     }
 
-    private fun key(s: String) =
+    internal fun key(s: String) =
         s.lowercase().replace(Regex("[^\\p{L}\\p{N}]"), " ").replace(Regex("\\s+"), " ").trim()
+
+    /** Reset state — for testing only. */
+    @Synchronized
+    internal fun reset() { mem.clear(); stamps.clear(); loaded = false }
 }

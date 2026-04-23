@@ -1264,4 +1264,10 @@
      <string name="steam_save_import_failed">Kunne ikke importere gemte filer: %s</string>
     <string name="option_import_saves">Importér gemte spil</string>
     <string name="option_export_saves">Eksportér gemte spil</string>
+    <!-- HLTB (How Long To Beat) -->
+    <string name="hltb_main_story">Hovedhistorie</string>
+    <string name="hltb_main_plus_extras">Hoved + Ekstra</string>
+    <string name="hltb_completionist">Perfektionist</string>
+    <string name="hltb_all_styles">Alle stilarter</string>
+    <string name="hltb_view_on_hltb">Se på HowLongToBeat</string>
 </resources>

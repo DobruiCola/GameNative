@@ -1397,4 +1397,10 @@
      <string name="steam_save_import_failed">Nie udało się zaimportować zapisów: %s</string>
     <string name="option_import_saves">Importuj zapisy</string>
     <string name="option_export_saves">Eksportuj zapisy</string>
+    <!-- HLTB (How Long To Beat) -->
+    <string name="hltb_main_story">Główna fabuła</string>
+    <string name="hltb_main_plus_extras">Główna + Dodatki</string>
+    <string name="hltb_completionist">Perfekcjonista</string>
+    <string name="hltb_all_styles">Wszystkie style</string>
+    <string name="hltb_view_on_hltb">Zobacz na HowLongToBeat</string>
 </resources>

@@ -1398,4 +1398,10 @@
      <string name="steam_save_import_failed">세이브 데이터 가져오기 실패: %s</string>
     <string name="option_import_saves">세이브 가져오기</string>
     <string name="option_export_saves">세이브 내보내기</string>
+    <!-- HLTB (How Long To Beat) -->
+    <string name="hltb_main_story">메인 스토리</string>
+    <string name="hltb_main_plus_extras">메인 + 추가</string>
+    <string name="hltb_completionist">완벽주의자</string>
+    <string name="hltb_all_styles">모든 스타일</string>
+    <string name="hltb_view_on_hltb">HowLongToBeat에서 보기</string>
 </resources>

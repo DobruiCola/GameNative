@@ -3,8 +3,8 @@
 package app.gamenative.ui.screen.library
 
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.clickable
+import app.gamenative.ui.screen.library.components.HltbHeroStrip
 import android.content.res.Configuration
 import app.gamenative.ui.screen.library.components.ambient.AmbientDownloadOverlay
 import android.view.KeyEvent
@@ -290,55 +290,6 @@ private fun PrimaryActionButton(
     }
 }
 
-
-@Composable
-private fun HltbHeroStrip(stats: app.gamenative.utils.HltbService.Stats) {
-    val context = LocalContext.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black.copy(alpha = 0.45f))
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        listOf(
-            stringResource(R.string.hltb_main_story) to stats.mainHours,
-            stringResource(R.string.hltb_main_plus_extras) to stats.mainPlusHours,
-            stringResource(R.string.hltb_completionist) to stats.completeHours,
-            stringResource(R.string.hltb_all_styles) to stats.allStylesHours,
-        ).forEach { (label, hours) ->
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = if (hours == "--") "--" else "${hours}h",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                    color = Color.White,
-                )
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White.copy(alpha = 0.7f),
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-        if (stats.gameId > 0) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                contentDescription = stringResource(R.string.hltb_view_on_hltb),
-                tint = Color.White.copy(alpha = 0.7f),
-                modifier = Modifier
-                    .size(18.dp)
-                    .clickable {
-                        context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse("https://howlongtobeat.com/game/${stats.gameId}"))
-                        )
-                    },
-            )
-        }
-    }
-}
 
 /**
  * Icon-only action button for the overlay action bar

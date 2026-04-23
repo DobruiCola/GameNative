@@ -1387,4 +1387,10 @@
      <string name="steam_save_import_failed">导入存档失败：%s</string>
     <string name="option_import_saves">导入存档</string>
     <string name="option_export_saves">导出存档</string>
+    <!-- HLTB (How Long To Beat) -->
+    <string name="hltb_main_story">主线剧情</string>
+    <string name="hltb_main_plus_extras">主线 + 支线</string>
+    <string name="hltb_completionist">完美主义者</string>
+    <string name="hltb_all_styles">所有风格</string>
+    <string name="hltb_view_on_hltb">在 HowLongToBeat 上查看</string>
 </resources>

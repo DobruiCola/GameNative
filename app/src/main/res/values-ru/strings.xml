@@ -1327,4 +1327,10 @@ https://gamenative.app
      <string name="steam_save_import_failed">Не удалось импортировать сохранения: %s</string>
     <string name="option_import_saves">Импортировать сохранения</string>
     <string name="option_export_saves">Экспортировать сохранения</string>
+    <!-- HLTB (How Long To Beat) -->
+    <string name="hltb_main_story">Основной сюжет</string>
+    <string name="hltb_main_plus_extras">Основное + Дополнения</string>
+    <string name="hltb_completionist">Перфекционист</string>
+    <string name="hltb_all_styles">Все стили</string>
+    <string name="hltb_view_on_hltb">Смотреть на HowLongToBeat</string>
 </resources>
