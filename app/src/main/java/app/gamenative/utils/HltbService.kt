@@ -36,6 +36,7 @@ object HltbService {
         val mainPlusHours: String,
         val completeHours: String,
         val allStylesHours: String,
+        val gameId: Int = 0,
     )
 
     private data class Auth(val token: String, val hpKey: String, val hpVal: String)
@@ -127,6 +128,7 @@ object HltbService {
                 mainPlusHours = secs(g.optLong("comp_plus")),
                 completeHours = secs(g.optLong("comp_100")),
                 allStylesHours = secs(g.optLong("comp_all")),
+                gameId = g.optInt("game_id", 0),
             )
         } catch (e: Exception) { Timber.tag("HLTB").e(e, "search '$name'"); null }
     }

@@ -3,6 +3,8 @@
 package app.gamenative.ui.screen.library
 
 import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.clickable
 import android.content.res.Configuration
 import app.gamenative.ui.screen.library.components.ambient.AmbientDownloadOverlay
 import android.view.KeyEvent
@@ -39,6 +41,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -290,6 +293,7 @@ private fun PrimaryActionButton(
 
 @Composable
 private fun HltbHeroStrip(stats: app.gamenative.utils.HltbService.Stats) {
+    val context = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -297,6 +301,7 @@ private fun HltbHeroStrip(stats: app.gamenative.utils.HltbService.Stats) {
             .background(Color.Black.copy(alpha = 0.45f))
             .padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         listOf(
             stringResource(R.string.hltb_main_story) to stats.mainHours,
@@ -317,6 +322,20 @@ private fun HltbHeroStrip(stats: app.gamenative.utils.HltbService.Stats) {
                     textAlign = TextAlign.Center,
                 )
             }
+        }
+        if (stats.gameId > 0) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                contentDescription = stringResource(R.string.hltb_view_on_hltb),
+                tint = Color.White.copy(alpha = 0.7f),
+                modifier = Modifier
+                    .size(18.dp)
+                    .clickable {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse("https://howlongtobeat.com/game/${stats.gameId}"))
+                        )
+                    },
+            )
         }
     }
 }
