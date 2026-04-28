@@ -16,6 +16,7 @@ import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.hardware.display.DisplayManager
 import android.hardware.input.InputManager
 import android.view.InputDevice
 import androidx.activity.ComponentActivity
@@ -38,8 +39,11 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import app.gamenative.MainActivity
@@ -56,9 +60,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.gamenative.R
 import app.gamenative.ui.util.SnackbarManager
+import app.gamenative.ui.util.applyScreenEffectsConfig
+import app.gamenative.ui.util.loadScreenEffectsConfig
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -86,6 +93,8 @@ import app.gamenative.service.epic.EpicService
 import app.gamenative.service.gog.GOGService
 import app.gamenative.ui.component.QuickMenu
 import app.gamenative.ui.component.QuickMenuAction
+import app.gamenative.ui.component.parseBooleanExtra
+import app.gamenative.ui.component.parsePositiveFpsLimit
 import app.gamenative.ui.data.PerformanceHudConfig
 import app.gamenative.ui.data.PerformanceHudSize
 import app.gamenative.ui.data.XServerState
@@ -156,6 +165,7 @@ import com.winlator.xserver.ScreenInfo
 import com.winlator.xserver.Window
 import com.winlator.xserver.WindowManager
 import com.winlator.xserver.XServer
+import com.winlator.xserver.extensions.PresentExtension
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -178,6 +188,7 @@ import java.util.Arrays
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.io.path.name
+import kotlin.math.roundToInt
 import kotlin.text.lowercase
 import com.winlator.PrefManager as WinlatorPrefManager
 
@@ -192,6 +203,38 @@ private const val EXIT_PROCESS_TIMEOUT_MS = 30_000L
 private const val EXIT_PROCESS_POLL_INTERVAL_MS = 1_000L
 private const val EXIT_PROCESS_RESPONSE_TIMEOUT_MS = 2_000L
 private const val QUICK_MENU_PROCESS_POLL_INTERVAL_MS = 2_000L
+private const val DEFAULT_FPS_LIMITER_MAX_HZ = 60
+private const val DEFAULT_FPS_LIMITER_TARGET_HZ = 60
+private const val FPS_LIMITER_ENABLED_EXTRA = "fpsLimiterEnabled"
+private const val FPS_LIMITER_TARGET_EXTRA = "fpsLimiterTarget"
+
+private fun initialFpsLimiterEnabled(container: Container): Boolean =
+    parseBooleanExtra(container.getExtra(FPS_LIMITER_ENABLED_EXTRA)) ?: true
+
+private fun initialFpsLimiterTarget(container: Container): Int =
+    parsePositiveFpsLimit(container.getExtra(FPS_LIMITER_TARGET_EXTRA))
+        ?: DEFAULT_FPS_LIMITER_TARGET_HZ
+
+private fun detectMaxRefreshRateHz(context: Context, attachedView: View?): Int {
+    val display = attachedView?.display
+        ?: context.display
+        ?: ContextCompat.getSystemService(context, DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
+
+    val refreshRate = when {
+        display == null -> DEFAULT_FPS_LIMITER_MAX_HZ.toFloat()
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
+            val supportedMax = display.supportedModes.maxOfOrNull { it.refreshRate } ?: display.refreshRate
+            if (supportedMax.isFinite() && supportedMax > 0f) supportedMax else display.refreshRate
+        }
+        else -> display.refreshRate
+    }
+
+    return refreshRate
+        .takeIf { it.isFinite() && it > 0f }
+        ?.roundToInt()
+        ?.coerceAtLeast(5)
+        ?: DEFAULT_FPS_LIMITER_MAX_HZ
+}
 
 private data class XServerViewReleaseBinding(
     val xServerView: XServerView,
@@ -300,6 +343,7 @@ fun XServerScreen(
     Timber.i("Starting up XServerScreen")
     val context = LocalContext.current
     val view = LocalView.current
+    val scope = rememberCoroutineScope()
     val imm = remember(context) {
         context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
     }
@@ -411,11 +455,15 @@ fun XServerScreen(
     var showElementEditor by remember { mutableStateOf(false) }
     var elementToEdit by remember { mutableStateOf<com.winlator.inputcontrols.ControlElement?>(null) }
     var showPhysicalControllerDialog by remember { mutableStateOf(false) }
+    var showPlayingBlockedDialog by rememberSaveable { mutableStateOf(false) }
     var showTouchGestureDialog by remember { mutableStateOf(false) }
     var isTouchscreenModeActive by remember { mutableStateOf(container.isTouchscreenMode) }
     var currentGestureConfig by remember {
         mutableStateOf(app.gamenative.data.TouchGestureConfig.fromJson(container.getGestureConfig()))
     }
+    val clickHighlightPoints = remember { mutableStateListOf<app.gamenative.ui.component.HighlightPoint>() }
+    var debugGestureName by remember { mutableStateOf("") }
+    var debugGestureKey by remember { mutableIntStateOf(0) }
     var keyboardRequestedFromOverlay by remember { mutableStateOf(false) }
     var showQuickMenu by remember { mutableStateOf(false) }
     var quickMenuToolsVisible by remember { mutableStateOf(false) }
@@ -428,6 +476,16 @@ fun XServerScreen(
     var hasInternalTouchpad by remember { mutableStateOf(false) }
     var hasUpdatedScreenGamepad by remember { mutableStateOf(false) }
     var isPerformanceHudEnabled by remember { mutableStateOf(PrefManager.showFps) }
+    val shouldTrackDisplayedFrames = remember { AtomicBoolean(false) }
+    var detectedMaxRefreshRateHz by remember { mutableIntStateOf(detectMaxRefreshRateHz(context, null)) }
+    var fpsLimiterEnabled by rememberSaveable(container.id) { mutableStateOf(initialFpsLimiterEnabled(container)) }
+    var fpsLimiterTarget by rememberSaveable(container.id) { mutableIntStateOf(initialFpsLimiterTarget(container)) }
+
+    fun persistFpsLimiterState() {
+        container.putExtra(FPS_LIMITER_ENABLED_EXTRA, fpsLimiterEnabled)
+        container.putExtra(FPS_LIMITER_TARGET_EXTRA, fpsLimiterTarget)
+        container.saveData()
+    }
 
     fun loadPerformanceHudConfig(): PerformanceHudConfig {
         return PerformanceHudConfig(
@@ -488,6 +546,45 @@ fun XServerScreen(
         performanceHudConfig = config
         persistPerformanceHudConfig(config)
         performanceHudView?.setConfig(config)
+    }
+
+    LaunchedEffect(xServerView?.renderer) {
+        xServerView?.renderer?.let { renderer ->
+            applyScreenEffectsConfig(renderer, loadScreenEffectsConfig(container))
+        }
+    }
+
+    fun applyFpsLimiterToEngines(limit: Int) {
+        xServerView?.setFrameRateLimit(limit)
+        xServerView?.getxServer()
+            ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
+            ?.setFrameRateLimit(limit)
+    }
+
+    fun applyFpsLimiterEnabled(enabled: Boolean) {
+        fpsLimiterEnabled = enabled
+        applyFpsLimiterToEngines(if (enabled) fpsLimiterTarget else 0)
+        persistFpsLimiterState()
+    }
+
+    fun applyFpsLimiterTarget(target: Int) {
+        val sanitized = target.coerceAtLeast(5).coerceAtMost(detectedMaxRefreshRateHz)
+        fpsLimiterTarget = sanitized
+        if (fpsLimiterEnabled) {
+            applyFpsLimiterToEngines(sanitized)
+        }
+        persistFpsLimiterState()
+    }
+
+    LaunchedEffect(xServerView) {
+        val detectedMax = detectMaxRefreshRateHz(context, xServerView)
+        detectedMaxRefreshRateHz = detectedMax
+        val clampedTarget = fpsLimiterTarget.coerceAtMost(detectedMax).coerceAtLeast(5)
+        if (clampedTarget != fpsLimiterTarget) {
+            fpsLimiterTarget = clampedTarget
+        }
+        val appliedLimit = if (fpsLimiterEnabled) clampedTarget else 0
+        applyFpsLimiterToEngines(appliedLimit)
     }
 
     fun restorePerformanceHudPosition() {
@@ -867,33 +964,36 @@ fun XServerScreen(
         }
     }
 
+    // Shows the soft keyboard, anchored to [anchor]. Handles the Android 12+
+    // post-delay quirk and routes input to the external display IME when needed.
+    val showSoftKeyboard: (View, String) -> Unit = { anchor, analyticsEvent ->
+        anchor.post {
+            if (anchor.windowToken != null) {
+                val show = {
+                    if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = analyticsEvent)
+                    val isExternalDisplaySession =
+                        (anchor.display?.displayId ?: Display.DEFAULT_DISPLAY) != Display.DEFAULT_DISPLAY
+
+                    if (isExternalDisplaySession) {
+                        imeInputReceiver?.showKeyboard() ?: imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+                    } else {
+                        imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+                    }
+                }
+                if (Build.VERSION.SDK_INT > 29) {
+                    anchor.postDelayed({ show() }, 500)  // Pixel/Android-12+ quirk
+                } else {
+                    show()
+                }
+            }
+        }
+    }
+
     val onQuickMenuItemSelected: (Int) -> Boolean = { itemId ->
         when (itemId) {
             QuickMenuAction.KEYBOARD -> {
                 keyboardRequestedFromOverlay = true
-                val anchor = view // use the same composable root view
-                val c = if (Build.VERSION.SDK_INT >= 30)
-                    anchor.windowInsetsController else null
-
-                anchor.post {
-                    if (anchor.windowToken == null) return@post
-                    val show = {
-                        if (PrefManager.usageAnalyticsEnabled) PostHog.capture(event = "onscreen_keyboard_enabled")
-                        val isExternalDisplaySession =
-                            (anchor.display?.displayId ?: Display.DEFAULT_DISPLAY) != Display.DEFAULT_DISPLAY
-
-                        if (isExternalDisplaySession) {
-                            imeInputReceiver?.showKeyboard() ?: imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
-                        } else {
-                            imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
-                        }
-                    }
-                    if (Build.VERSION.SDK_INT > 29 && c != null) {
-                        anchor.postDelayed({ show() }, 500)  // Pixel/Android-12+ quirk
-                    } else {
-                        show()
-                    }
-                }
+                showSoftKeyboard(view, "onscreen_keyboard_enabled")
                 true
             }
 
@@ -1301,6 +1401,10 @@ fun XServerScreen(
             Timber.i("onForceCloseApp")
             exit(xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
         }
+        val onPlayingBlocked: (SteamEvent.PlayingBlocked) -> Unit = {
+            Timber.i("onPlayingBlocked")
+            showPlayingBlockedDialog = true
+        }
         val debugCallback = Callback<String> { outputLine ->
             Timber.i(outputLine ?: "")
         }
@@ -1310,6 +1414,7 @@ fun XServerScreen(
         PluviaApp.events.on<AndroidEvent.MotionEvent, Boolean>(onMotionEvent)
         PluviaApp.events.on<AndroidEvent.GuestProgramTerminated, Unit>(onGuestProgramTerminated)
         PluviaApp.events.on<SteamEvent.ForceCloseApp, Unit>(onForceCloseApp)
+        PluviaApp.events.on<SteamEvent.PlayingBlocked, Unit>(onPlayingBlocked)
         ProcessHelper.addDebugCallback(debugCallback)
 
         onDispose {
@@ -1318,6 +1423,7 @@ fun XServerScreen(
             PluviaApp.events.off<AndroidEvent.MotionEvent, Boolean>(onMotionEvent)
             PluviaApp.events.off<AndroidEvent.GuestProgramTerminated, Unit>(onGuestProgramTerminated)
             PluviaApp.events.off<SteamEvent.ForceCloseApp, Unit>(onForceCloseApp)
+            PluviaApp.events.off<SteamEvent.PlayingBlocked, Unit>(onPlayingBlocked)
             ProcessHelper.removeDebugCallback(debugCallback)
         }
     }
@@ -1505,12 +1611,64 @@ fun XServerScreen(
                 xServerToUse,
             ).apply {
                 xServerView = this
+                setFrameRateLimit(if (fpsLimiterEnabled) fpsLimiterTarget else 0)
                 val renderer = this.renderer
-                renderer.isCursorVisible = false
+                renderer.setCursorVisible(false)
+                renderer.setOnFrameRenderedListener {
+                    if (shouldTrackDisplayedFrames.get()) {
+                        (context as? Activity)?.runOnUiThread {
+                            frameRating?.update()
+                        }
+                    }
+                }
                 getxServer().renderer = renderer
                 PluviaApp.touchpadView = TouchpadView(context, getxServer(), PrefManager.getBoolean("capture_pointer_on_external_mouse", true))
                 frameLayout.addView(PluviaApp.touchpadView)
                 PluviaApp.touchpadView?.setMoveCursorToTouchpoint(PrefManager.getBoolean("move_cursor_to_touchpoint", false))
+
+                // Wire keyboard toggle callback for gesture "Show Keyboard" action.
+                // Mirrors the QuickMenuAction.KEYBOARD external-display routing
+                // (uses imeInputReceiver on external displays) but skips the
+                // 500ms post-delay used by the menu path — a gesture is already
+                // a direct touch interaction and should respond immediately.
+                PluviaApp.touchpadView?.setShowKeyboardCallback {
+                    val anchor = PluviaApp.touchpadView ?: return@setShowKeyboardCallback
+                    anchor.post {
+                        if (anchor.windowToken == null) return@post
+                        val isExternalDisplaySession =
+                            (anchor.display?.displayId ?: android.view.Display.DEFAULT_DISPLAY) != android.view.Display.DEFAULT_DISPLAY
+                        if (isExternalDisplaySession) {
+                            imeInputReceiver?.showKeyboard()
+                                ?: imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+                        } else {
+                            imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+                        }
+                    }
+                }
+
+                // Wire click highlight + gesture debug listener
+                PluviaApp.touchpadView?.setClickHighlightListener(object : com.winlator.widget.TouchpadView.ClickHighlightListener {
+                    override fun onClickAt(screenX: Float, screenY: Float) {
+                        PluviaApp.touchpadView?.post {
+                            if (currentGestureConfig.showClickHighlight) {
+                                clickHighlightPoints.add(
+                                    app.gamenative.ui.component.HighlightPoint(
+                                        screenX, screenY,
+                                        androidx.compose.animation.core.Animatable(0.5f),
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                    override fun onGestureTriggered(gestureName: String) {
+                        PluviaApp.touchpadView?.post {
+                            if (currentGestureConfig.showGestureDebugOverlay) {
+                                debugGestureName = gestureName
+                                debugGestureKey++
+                            }
+                        }
+                    }
+                })
 
                 // Add invisible IME receiver to capture system keyboard input when keyboard is on external display
                 val imeDisplayContext = context.display?.let { display ->
@@ -1605,6 +1763,11 @@ fun XServerScreen(
                             }
                             if (frameRatingWindowId == -1 && window.isApplicationWindow()) {
                                 refreshFrameRatingTracking("content-update")
+                            }
+                            if (window.id == frameRatingWindowId) {
+                                (context as? Activity)?.runOnUiThread {
+                                    frameRating?.update()
+                                }
                             }
                         }
 
@@ -1868,7 +2031,14 @@ fun XServerScreen(
                     Timber.d("=== Profile Loading Complete ===")
                     setProfile(targetProfile)
 
-                    physicalControllerHandler = PhysicalControllerHandler(targetProfile, xServerView.getxServer(), gameBack)
+                    physicalControllerHandler = PhysicalControllerHandler(
+                        targetProfile,
+                        xServerView.getxServer(),
+                        gameBack,
+                        onShowKeyboard = {
+                            PluviaApp.inputControlsView?.triggerShowKeyboard()
+                        },
+                    )
 
                     // Store profile for auto-show logic
                     loadedProfile = targetProfile
@@ -1882,6 +2052,11 @@ fun XServerScreen(
                 setContainerShooterMode(container.isShooterMode)
             }
             PluviaApp.inputControlsView = icView
+
+            // Wire SHOW_KEYBOARD binding callback for overlay control buttons
+            icView.setShowKeyboardCallback {
+                showSoftKeyboard(icView, "onscreen_keyboard_enabled_from_binding")
+            }
 
             xServerView.getxServer().winHandler.setInputControlsView(PluviaApp.inputControlsView)
 
@@ -2040,10 +2215,12 @@ fun XServerScreen(
             gameRoot = null
             removePerformanceHud()
             performanceHudHost = null
+            shouldTrackDisplayedFrames.set(false)
 
             val releaseBinding = view.tag as? XServerViewReleaseBinding
             releaseBinding?.let { binding ->
                 // Remove the WindowManager listener associated with the released AndroidView.
+                binding.xServerView.renderer.setOnFrameRenderedListener(null)
                 binding.xServerView.getxServer().windowManager.removeOnWindowModificationListener(binding.windowModificationListener)
                 if (PluviaApp.xServerView === binding.xServerView) {
                     PluviaApp.xServerView = null
@@ -2052,6 +2229,37 @@ fun XServerScreen(
             view.tag = null
         },
     )
+        }
+
+        // Click highlight overlay (gesture overhaul)
+        if (currentGestureConfig.showClickHighlight && clickHighlightPoints.isNotEmpty()) {
+            app.gamenative.ui.component.ClickHighlightOverlay(points = clickHighlightPoints)
+        }
+
+        // Debug gesture name overlay (gesture overhaul)
+        if (currentGestureConfig.showGestureDebugOverlay && debugGestureName.isNotEmpty()) {
+            LaunchedEffect(debugGestureKey) {
+                kotlinx.coroutines.delay(1200)
+                debugGestureName = ""
+            }
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 48.dp),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                androidx.compose.material3.Text(
+                    text = debugGestureName,
+                    color = androidx.compose.ui.graphics.Color.White,
+                    fontSize = 18.sp,
+                    modifier = Modifier
+                        .background(
+                            androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f),
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                        )
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
         }
 
         // Floating toolbar for edit mode (always visible in edit mode)
@@ -2171,13 +2379,19 @@ fun XServerScreen(
             onDismiss = dismissOverlayMenu,
             onItemSelected = onQuickMenuItemSelected,
             renderer = xServerView?.renderer,
+            container = container,
             winHandler = xServerView?.getxServer()?.winHandler,
             wineProcesses = quickMenuWineProcesses,
             isWineProcessesLoading = quickMenuWineProcessesLoading,
             onToolsVisibilityChanged = { quickMenuToolsVisible = it },
             isPerformanceHudEnabled = isPerformanceHudEnabled,
             performanceHudConfig = performanceHudConfig,
+            fpsLimiterEnabled = fpsLimiterEnabled,
+            fpsLimiterTarget = fpsLimiterTarget,
+            fpsLimiterMax = detectedMaxRefreshRateHz,
             onPerformanceHudConfigChanged = ::applyPerformanceHudConfig,
+            onFpsLimiterEnabledChanged = ::applyFpsLimiterEnabled,
+            onFpsLimiterChanged = ::applyFpsLimiterTarget,
             hasPhysicalController = hasPhysicalController,
             isTouchscreenModeActive = isTouchscreenModeActive,
             onTouchGestureSettingsClick = { showTouchGestureDialog = true },
@@ -2247,6 +2461,33 @@ fun XServerScreen(
                 container.saveData()
                 PluviaApp.touchpadView?.setGestureConfig(newConfig)
                 showTouchGestureDialog = false
+            },
+        )
+    }
+
+    if (showPlayingBlockedDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {},
+            title = { Text(text = stringResource(R.string.main_app_running_title)) },
+            text = { Text(text = stringResource(R.string.main_app_running_message, context.getString(R.string.main_app_running_unknown_game))) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPlayingBlockedDialog = false
+                    SteamService.clearPlayingConflict()
+                    scope.launch {
+                        SteamService.kickPlayingSession(onlyGame = true)
+                    }
+                }) {
+                    Text(text = stringResource(R.string.main_play_anyway))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showPlayingBlockedDialog = false
+                    exit(xServerView?.getxServer()?.winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
+                }) {
+                    Text(text = stringResource(R.string.cancel))
+                }
             },
         )
     }
