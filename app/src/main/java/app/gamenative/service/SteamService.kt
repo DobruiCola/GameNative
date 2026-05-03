@@ -578,6 +578,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             }
             val map = HashMap<Int, MutableSet<Int>>()
             for (license in licenses) {
+                if (ELicenseFlags.Expired in license.licenseFlags) continue
                 if (license.depotIds.isEmpty()) continue
                 for (appId in license.appIds) {
                     if (appId !in target) continue
