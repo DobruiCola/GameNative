@@ -3,6 +3,7 @@ package app.gamenative.service.epic
 import android.content.Context
 import app.gamenative.data.EpicGame
 import app.gamenative.data.EpicGameToken
+import com.winlator.container.Container
 import timber.log.Timber
 import java.io.File
 import java.io.IOException
@@ -26,6 +27,7 @@ object EpicGameLauncher {
     */
     suspend fun buildLaunchParameters(
         context: Context,
+        container: Container,
         game: EpicGame,
         offline: Boolean = false,
         languageCode: String = "en-US"
@@ -67,7 +69,7 @@ object EpicGameLauncher {
 
             // Save ownership token to temp file if present
             val ownershipTokenPath = if (gameToken.ownershipToken != null) {
-                saveOwnershipTokenToFile(context, game.namespace, game.catalogId, gameToken.ownershipToken)
+                saveOwnershipTokenToFile(container, game.namespace, game.catalogId, gameToken.ownershipToken)
             } else {
                 null
             }
@@ -114,9 +116,17 @@ object EpicGameLauncher {
                 Timber.tag("EPIC").d("Added ownership token path: $ownershipTokenPath")
             }
 
-            // Additional command-line parameters from game metadata
-            // This would come from game.metadata.customAttributes.AdditionalCommandLine -- We should take this into account if need be
-            // TODO: Do a follow-up to include additional parameters where required for some games
+            val additionalCommandLine = EpicService.getInstance()?.epicManager?.fetchAdditionalCommandLine(
+                context = context,
+                namespace = game.namespace,
+                catalogItemId = game.catalogId,
+                appName = game.appName,
+            )
+            if (!additionalCommandLine.isNullOrBlank()) {
+                val extraArgs = additionalCommandLine.trim().split(Regex("\\s+"))
+                params.addAll(extraArgs)
+                Timber.tag("EPIC").d("Added ${extraArgs.size} additional command-line args for ${game.appName}")
+            }
 
             Timber.tag("EPIC").d("Built ${params.size} launch parameters for ${game.appName}")
             Result.success(params)
@@ -127,15 +137,12 @@ object EpicGameLauncher {
     }
 
     /**
-     * Save ownership token bytes to temp file
-     * File path format: {temp_dir}/{namespace}{catalogItemId}.ovt
-     *
-     * @return Absolute path to the saved token file
-     * @throws IllegalArgumentException if ownershipTokenHex is invalid
-     * @throws IOException if file write fails
+     * Save ownership token bytes inside the container's Wine prefix and return the
+     * Windows-style path. Must be inside the prefix because Pluvia's dosdevices map
+     * doesn't expose the app cache dir on any drive letter.
      */
     private fun saveOwnershipTokenToFile(
-        context: Context,
+        container: Container,
         namespace: String,
         catalogItemId: String,
         ownershipTokenHex: String
@@ -151,15 +158,17 @@ object EpicGameLauncher {
             throw IllegalArgumentException("Ownership token hex string contains invalid characters")
         }
 
-        val tempDir = File(context.cacheDir, "epic_tokens")
-        if (!tempDir.exists()) {
-            tempDir.mkdirs()
-        }
-
         // Sanitize namespace and catalogItemId to prevent path traversal
         val sanitizedNamespace = namespace.replace(Regex("[^a-zA-Z0-9_-]"), "_")
         val sanitizedCatalogId = catalogItemId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        val tokenFile = File(tempDir, "$sanitizedNamespace$sanitizedCatalogId.ovt")
+        val fileName = "$sanitizedNamespace$sanitizedCatalogId.ovt"
+
+        val tokenDirInPrefix = File(container.rootDir, ".wine/drive_c/users/Public/Documents/EpicTokens")
+        if (!tokenDirInPrefix.exists() && !tokenDirInPrefix.mkdirs()) {
+            throw IOException("Failed to create OT directory: ${tokenDirInPrefix.absolutePath}")
+        }
+
+        val tokenFile = File(tokenDirInPrefix, fileName)
 
         try {
             // Convert hex string back to bytes
@@ -174,8 +183,9 @@ object EpicGameLauncher {
                 .toByteArray()
 
             tokenFile.writeBytes(tokenBytes)
-            Timber.tag("EPIC").d("Ownership token saved to: ${tokenFile.absolutePath}")
-            return tokenFile.absolutePath
+            val winPath = "C:\\users\\Public\\Documents\\EpicTokens\\$fileName"
+            Timber.tag("EPIC").d("Ownership token saved to: ${tokenFile.absolutePath} (wine path: $winPath)")
+            return winPath
         } catch (e: IllegalArgumentException) {
             Timber.tag("EPIC").e(e, "Failed to parse ownership token hex string")
             throw e
@@ -188,7 +198,23 @@ object EpicGameLauncher {
     /**
      * Clean up temporary ownership token files after game exits
      */
-    fun cleanupOwnershipTokens(context: Context) {
+    fun cleanupOwnershipTokens(context: Context, container: Container? = null) {
+        if (container != null) {
+            try {
+                val tokenDirInPrefix = File(container.rootDir, ".wine/drive_c/users/Public/Documents/EpicTokens")
+                if (tokenDirInPrefix.exists() && tokenDirInPrefix.isDirectory) {
+                    tokenDirInPrefix.listFiles()?.forEach { file ->
+                        if (file.extension == "ovt") {
+                            file.delete()
+                            Timber.tag("EPIC").d("Deleted ownership token file: ${file.name}")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to cleanup ownership token files")
+            }
+        }
+
         try {
             val tempDir = File(context.cacheDir, "epic_tokens")
             if (tempDir.exists() && tempDir.isDirectory) {
