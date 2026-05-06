@@ -138,22 +138,22 @@ object EpicGameLauncher {
     }
 
     /**
-     * Tokenize a command-line string, preserving quoted segments. Adjacent
-     * quoted/unquoted runs collapse into one token (so `-arg="value with spaces"`
-     * yields `-arg=value with spaces`). Unbalanced quotes consume to end-of-string.
+     * Tokenize a Windows-style command-line string, preserving double-quoted
+     * segments. Adjacent quoted/unquoted runs collapse into one token (so
+     * `-arg="value with spaces"` yields `-arg=value with spaces`). Single quotes
+     * are treated as literal characters to match `CommandLineToArgvW` semantics —
+     * args like `-name=Don't` must not be split or merged. Unbalanced double
+     * quotes consume to end-of-string.
      */
     private fun tokenizeArgs(input: String): List<String> {
         val tokens = mutableListOf<String>()
         val current = StringBuilder()
         var inDouble = false
-        var inSingle = false
         var hasToken = false
         for (c in input) {
             when {
                 inDouble -> if (c == '"') inDouble = false else current.append(c)
-                inSingle -> if (c == '\'') inSingle = false else current.append(c)
                 c == '"' -> { inDouble = true; hasToken = true }
-                c == '\'' -> { inSingle = true; hasToken = true }
                 c.isWhitespace() -> {
                     if (hasToken) {
                         tokens.add(current.toString())
