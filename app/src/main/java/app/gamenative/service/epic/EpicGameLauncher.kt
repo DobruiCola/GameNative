@@ -3,6 +3,7 @@ package app.gamenative.service.epic
 import android.content.Context
 import app.gamenative.data.EpicGame
 import app.gamenative.data.EpicGameToken
+import app.gamenative.utils.sanitizeForFilename
 import com.winlator.container.Container
 import timber.log.Timber
 import java.io.File
@@ -123,7 +124,7 @@ object EpicGameLauncher {
                 appName = game.appName,
             )
             if (!additionalCommandLine.isNullOrBlank()) {
-                val extraArgs = additionalCommandLine.trim().split(Regex("\\s+"))
+                val extraArgs = tokenizeArgs(additionalCommandLine)
                 params.addAll(extraArgs)
                 Timber.tag("EPIC").d("Added ${extraArgs.size} additional command-line args for ${game.appName}")
             }
@@ -134,6 +135,37 @@ object EpicGameLauncher {
             Timber.e(e, "Failed to build launch parameters")
             Result.failure(e)
         }
+    }
+
+    /**
+     * Tokenize a command-line string, preserving quoted segments. Adjacent
+     * quoted/unquoted runs collapse into one token (so `-arg="value with spaces"`
+     * yields `-arg=value with spaces`). Unbalanced quotes consume to end-of-string.
+     */
+    private fun tokenizeArgs(input: String): List<String> {
+        val tokens = mutableListOf<String>()
+        val current = StringBuilder()
+        var inDouble = false
+        var inSingle = false
+        var hasToken = false
+        for (c in input) {
+            when {
+                inDouble -> if (c == '"') inDouble = false else current.append(c)
+                inSingle -> if (c == '\'') inSingle = false else current.append(c)
+                c == '"' -> { inDouble = true; hasToken = true }
+                c == '\'' -> { inSingle = true; hasToken = true }
+                c.isWhitespace() -> {
+                    if (hasToken) {
+                        tokens.add(current.toString())
+                        current.setLength(0)
+                        hasToken = false
+                    }
+                }
+                else -> { current.append(c); hasToken = true }
+            }
+        }
+        if (hasToken) tokens.add(current.toString())
+        return tokens
     }
 
     /**
@@ -159,9 +191,7 @@ object EpicGameLauncher {
         }
 
         // Sanitize namespace and catalogItemId to prevent path traversal
-        val sanitizedNamespace = namespace.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        val sanitizedCatalogId = catalogItemId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        val fileName = "$sanitizedNamespace$sanitizedCatalogId.ovt"
+        val fileName = "${namespace.sanitizeForFilename()}${catalogItemId.sanitizeForFilename()}.ovt"
 
         val tokenDirInPrefix = File(container.rootDir, ".wine/drive_c/users/Public/Documents/EpicTokens")
         if (!tokenDirInPrefix.exists() && !tokenDirInPrefix.mkdirs()) {

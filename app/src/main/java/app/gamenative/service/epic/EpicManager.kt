@@ -7,6 +7,7 @@ import app.gamenative.data.LaunchInfo
 import app.gamenative.data.LibraryItem
 import app.gamenative.db.dao.EpicGameDao
 import app.gamenative.utils.Net
+import app.gamenative.utils.sanitizeForFilename
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -212,10 +213,21 @@ class EpicManager @Inject constructor(
 
             // Re-fetch catalog metadata for every game so customAttributes-derived
             // fields (requiresOT, canRunOffline, ...) backfill on existing rows.
+            // Hoist credential read out of the per-game loop — refreshing once is
+            // sufficient since a library scan completes in seconds and the token
+            // has a 5-minute expiry buffer in getStoredCredentials.
+            val credentialsResult = EpicAuthManager.getStoredCredentials(context)
+            val accessToken = credentialsResult.getOrNull()?.accessToken
+            if (credentialsResult.isFailure || accessToken.isNullOrEmpty()) {
+                val error = credentialsResult.exceptionOrNull() ?: Exception("No access token")
+                Timber.tag("Epic").e(error, "Cannot refresh library: ${error.message}")
+                return@withContext Result.failure(error)
+            }
+
             val epicGames = mutableListOf<EpicGame>()
             var processedCount = 0
             for ((index, game) in gamesList.withIndex()) {
-                val result = fetchGameInfo(context, game)
+                val result = fetchGameInfo(context, game, accessToken)
 
                 if (result.isSuccess) {
                     val epicGame = result.getOrNull()
@@ -402,59 +414,62 @@ class EpicManager @Inject constructor(
     private suspend fun fetchGameInfo(
         context: Context,
         game: ParsedLibraryItem,
+        accessToken: String,
     ): Result<EpicGame> = withContext(Dispatchers.IO) {
         try {
-            // Get Credentials and restore them
-            val credentials = EpicAuthManager.getStoredCredentials(context)
-            if (credentials.isFailure) {
-                return@withContext Result.failure(credentials.exceptionOrNull() ?: Exception("No credentials"))
-            }
-
-            val accessToken = credentials.getOrNull()?.accessToken
-            if (accessToken.isNullOrEmpty()) {
-                return@withContext Result.failure(Exception("No access token"))
-            }
-
-            val country = game.country ?: "US" // Do we really need this?
-
             // ! We should expertiment with the country to see what affects language downloads
-            val url = "${EpicConstants.EPIC_CATALOG_API_URL}/shared/namespace/${game.namespace}/bulk/items" +
-                "?id=${game.catalogItemId}&includeDLCDetails=true&includeMainGameDetails=true" +
-                "&country=$country"
+            val gameData = fetchCatalogItem(
+                namespace = game.namespace,
+                catalogItemId = game.catalogItemId,
+                accessToken = accessToken,
+                country = game.country ?: "US",
+                includeDLCDetails = true,
+                includeMainGameDetails = true,
+            ) ?: return@withContext Result.failure(Exception("Game data not found in response"))
 
-            Timber.tag("Epic").d("fetching game info for ${game.appName} - url: $url")
-
-            val request = Request.Builder()
-                .url(url)
-                .header("Authorization", "Bearer $accessToken")
-                .header("User-Agent", EpicConstants.EPIC_USER_AGENT)
-                .get()
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-
-            if (!response.isSuccessful) {
-                Timber.w("Failed to fetch game info for ${game.catalogItemId}: ${response.code}")
-                return@withContext Result.failure(Exception("Could not fetch game info: ${response.code}"))
-            }
-
-            val body = response.body?.string()
-            if (body.isNullOrEmpty()) {
-                return@withContext Result.failure(Exception("Could not fetch game info for ${game.catalogItemId}"))
-            }
-
-            val json = JSONObject(body)
-            val gameData: JSONObject? = json.optJSONObject(game.catalogItemId)
-
-            if (gameData != null) {
-                val epicGame = parseGameFromCatalog(gameData, game.appName)
-                return@withContext Result.success(epicGame)
-            } else {
-                return@withContext Result.failure(Exception("Game data not found in response"))
-            }
+            Result.success(parseGameFromCatalog(gameData, game.appName))
         } catch (e: Exception) {
             Timber.w(e, "Error fetching game info for ${game.catalogItemId}")
-            return@withContext Result.failure(e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * GET a single item from `/shared/namespace/{ns}/bulk/items` and return the
+     * per-`catalogItemId` JSONObject (or null if the request failed / item missing).
+     * Caller must be on a background dispatcher; the underlying HTTP call is blocking.
+     */
+    private fun fetchCatalogItem(
+        namespace: String,
+        catalogItemId: String,
+        accessToken: String,
+        country: String = "US",
+        includeDLCDetails: Boolean = false,
+        includeMainGameDetails: Boolean = false,
+    ): JSONObject? {
+        val params = buildString {
+            append("?id=").append(catalogItemId)
+            if (includeDLCDetails) append("&includeDLCDetails=true")
+            if (includeMainGameDetails) append("&includeMainGameDetails=true")
+            append("&country=").append(country)
+        }
+        val url = "${EpicConstants.EPIC_CATALOG_API_URL}/shared/namespace/$namespace/bulk/items$params"
+
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $accessToken")
+            .header("User-Agent", EpicConstants.EPIC_USER_AGENT)
+            .get()
+            .build()
+
+        return httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                Timber.tag("Epic").w("Catalog fetch failed for $namespace:$catalogItemId: ${response.code}")
+                return@use null
+            }
+            val body = response.body?.string()
+            if (body.isNullOrEmpty()) return@use null
+            JSONObject(body).optJSONObject(catalogItemId)
         }
     }
 
@@ -951,8 +966,7 @@ class EpicManager @Inject constructor(
         forceRefresh: Boolean = false,
     ): String? = withContext(Dispatchers.IO) {
         val cacheDir = File(context.filesDir, "epic/deployment_ids").also { it.mkdirs() }
-        val sanitized = appName.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        val cacheFile = File(cacheDir, "$sanitized.txt")
+        val cacheFile = File(cacheDir, "${appName.sanitizeForFilename()}.txt")
 
         if (!forceRefresh && cacheFile.exists()) {
             val cacheAgeMs = System.currentTimeMillis() - cacheFile.lastModified()
@@ -1037,8 +1051,7 @@ class EpicManager @Inject constructor(
         forceRefresh: Boolean = false,
     ): String? = withContext(Dispatchers.IO) {
         val cacheDir = File(context.filesDir, "epic/additional_cmdline").also { it.mkdirs() }
-        val sanitized = appName.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        val cacheFile = File(cacheDir, "$sanitized.txt")
+        val cacheFile = File(cacheDir, "${appName.sanitizeForFilename()}.txt")
 
         if (!forceRefresh && cacheFile.exists()) {
             val cacheAgeMs = System.currentTimeMillis() - cacheFile.lastModified()
@@ -1052,24 +1065,12 @@ class EpicManager @Inject constructor(
             val accessToken = credentials.getOrNull()?.accessToken
             if (accessToken.isNullOrEmpty()) return@withContext null
 
-            val url = "${EpicConstants.EPIC_CATALOG_API_URL}/shared/namespace/$namespace/bulk/items" +
-                "?id=$catalogItemId&country=US"
+            val gameData = fetchCatalogItem(
+                namespace = namespace,
+                catalogItemId = catalogItemId,
+                accessToken = accessToken,
+            ) ?: return@withContext null
 
-            val request = Request.Builder()
-                .url(url)
-                .header("Authorization", "Bearer $accessToken")
-                .header("User-Agent", EpicConstants.EPIC_USER_AGENT)
-                .get()
-                .build()
-
-            val catalogJson = httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                val body = response.body?.string()
-                if (body.isNullOrEmpty()) return@withContext null
-                JSONObject(body)
-            }
-
-            val gameData = catalogJson.optJSONObject(catalogItemId) ?: return@withContext null
             val additionalCommandLine = parseCustomAttributes(
                 gameData.optJSONObject("customAttributes"),
             ).additionalCommandline
