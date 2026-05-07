@@ -4937,16 +4937,8 @@ private fun extractSteamFiles(
         ImageFs.find(context).rootDir.absolutePath,
         ImageFs.WINEPREFIX + "/drive_c/Program Files (x86)/Steam/steam.exe",
     )
-    try {
-        steamExe.parentFile?.mkdirs()
-        context.assets.open("steam.exe").use { input ->
-            Files.copy(input, steamExe.toPath(), REPLACE_EXISTING)
-        }
-    } catch (e: IOException) {
-        Timber.e(e, "Failed to copy steam.exe asset")
-    }
 
-    if (File(ImageFs.find(context).rootDir.absolutePath, ImageFs.WINEPREFIX + "/drive_c/Program Files (x86)/Steam/steam.exe").exists()) return
+//    if (File(ImageFs.find(context).rootDir.absolutePath, ImageFs.WINEPREFIX + "/drive_c/Program Files (x86)/Steam/steam.exe").exists()) return
     val downloaded = File(imageFs.getFilesDir(), "steam.tzst")
     Timber.i("Extracting steam.tzst")
     TarCompressorUtils.extract(
@@ -4955,6 +4947,14 @@ private fun extractSteamFiles(
         imageFs.getRootDir(),
         onExtractFileListener,
     );
+    try {
+        steamExe.parentFile?.mkdirs()
+        context.assets.open("steam.exe").use { input ->
+            Files.copy(input, steamExe.toPath(), REPLACE_EXISTING)
+        }
+    } catch (e: IOException) {
+        Timber.e(e, "Failed to copy steam.exe asset")
+    }
 }
 
 private fun readZipManifestNameFromAssets(context: Context, assetName: String): String? {
