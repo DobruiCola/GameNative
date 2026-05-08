@@ -1301,4 +1301,19 @@
     <string name="hltb_completionist">Completista</string>
     <string name="hltb_all_styles">Todos os estilos</string>
     <string name="hltb_view_on_hltb">Ver no HowLongToBeat</string>
+
+    <!-- LSFG-VK frame generation -->
+    <string name="lsfg_tab_title">LSFG-VK</string>
+    <string name="lsfg_description">Gerar quadros intermediários usando a camada Vulkan do Lossless Scaling. Funciona apenas em Adreno 6xx e posteriores, conforme se sabe.</string>
+    <string name="lsfg_enable">Ativar geração de quadros LSFG-VK</string>
+    <string name="lsfg_multiplier">Multiplicador de quadros</string>
+    <string name="lsfg_flow_scale">Escala de fluxo</string>
+    <string name="lsfg_performance_mode">Modo de desempenho</string>
+    <string name="lsfg_not_supported">A geração de quadros requer um contêiner Bionic</string>
+    <string name="lsfg_install_prompt">Lossless Scaling não instalado. Toque para instalar. Funciona apenas em Adreno 6xx e posteriores, conforme se sabe.</string>
+    <string name="lsfg_not_in_library">Lossless Scaling não está na sua biblioteca Steam</string>
+    <string name="lsfg_install_title">Instalar Lossless Scaling?</string>
+    <string name="lsfg_install_message">Isso baixará o Lossless Scaling do Steam para ativar a geração de quadros.</string>
+    <string name="lsfg_installing">Baixando Lossless Scaling…</string>
+    <string name="lsfg_performance_mode_desc">Reduz qualidade para maior taxa de processamento</string>
 </resources>

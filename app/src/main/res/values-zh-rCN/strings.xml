@@ -1480,6 +1480,7 @@
     <string name="screen_effects_scaling_mode_fill">填充</string>
     <string name="screen_effects_scaling_mode_stretch">拉伸</string>
     <string name="screen_effects_scaling_mode_fsr">FSR</string>
+    <string name="screen_effects_scaling_mode_fsr_aspect">FSR 适配</string>
     <string name="screen_effects_fsr">FSR 1.0</string>
     <string name="screen_effects_fsr_description">官方 AMD FidelityFX Super Resolution 1.0，使用 EASU + RCAS，以较低的内部分辨率渲染并进行全分辨率放大。</string>
     <string name="screen_effects_fsr_quality">FSR 质量</string>
@@ -1497,11 +1498,25 @@
 
     <!-- 工具：Wine 进程 -->
     <string name="tools_wine_processes_empty">未检测到正在运行的EXE。</string>
-
     <!-- HLTB (How Long To Beat) -->
     <string name="hltb_main_story">主线剧情</string>
     <string name="hltb_main_plus_extras">主线 + 支线</string>
     <string name="hltb_completionist">完美主义者</string>
     <string name="hltb_all_styles">所有风格</string>
     <string name="hltb_view_on_hltb">在 HowLongToBeat 上查看</string>
+
+    <!-- LSFG-VK frame generation -->
+    <string name="lsfg_tab_title">LSFG-VK</string>
+    <string name="lsfg_description">使用 Lossless Scaling 的 Vulkan 层生成中间帧。已知仅在 Adreno 6xx 及更高版本上可用。</string>
+    <string name="lsfg_enable">启用 LSFG-VK 帧生成</string>
+    <string name="lsfg_multiplier">帧倍率</string>
+    <string name="lsfg_flow_scale">光流缩放</string>
+    <string name="lsfg_performance_mode">性能模式</string>
+    <string name="lsfg_not_supported">帧生成需要 Bionic 容器</string>
+    <string name="lsfg_install_prompt">Lossless Scaling 未安装。点击安装。已知仅在 Adreno 6xx 及更高版本上可用。</string>
+    <string name="lsfg_not_in_library">Lossless Scaling 不在你的 Steam 库中</string>
+    <string name="lsfg_install_title">安装 Lossless Scaling？</string>
+    <string name="lsfg_install_message">将从 Steam 下载 Lossless Scaling 以启用帧生成。</string>
+    <string name="lsfg_installing">正在下载 Lossless Scaling…</string>
+    <string name="lsfg_performance_mode_desc">降低画质以提升吞吐量</string>
 </resources>

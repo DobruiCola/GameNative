@@ -10,10 +10,18 @@ import java.io.File;
 public final class ImageFSLegacyMigrator {
     private ImageFSLegacyMigrator() {}
 
-    public static boolean migrateLegacyDirsIfNeeded(Context context, File legacyImageFsRoot) {
+    /**
+     * Migrate legacy directories if needed. After that, ensure the shared home and proton are symlinked.
+     */
+    public static boolean migrateLegacyDirsIfNeeded(Context context, File legacyImageFsRoot, String wineVersion) {
         if (!migrateLegacyHomeToShared(context, legacyImageFsRoot)) {
             return false;
         }
+        if (!migrateLegacyProtonToShared(context, legacyImageFsRoot)) {
+            return false;
+        }
+        ImageFsInstaller.ensureSharedHomeRoot(context, legacyImageFsRoot);
+        ImageFsInstaller.ensureProtonVersionSymlink(context, legacyImageFsRoot, wineVersion);
         return true;
     }
 
@@ -55,5 +63,49 @@ public final class ImageFSLegacyMigrator {
             Log.i("ImageFSLegacyMigrator", "Migrated legacy home via direct move to: " + sharedHomeRoot.getAbsolutePath());
             return true;
         }
+    }
+
+    /**
+     * Before deleting legacy opt/proton-<version> directories, preserve them by moving them into
+     * files/imagefs_shared/proton so they can be symlinked.
+     */
+    private static boolean migrateLegacyProtonToShared(Context context, File legacyImageFsRoot) {
+        File optDir = new File(legacyImageFsRoot, "opt");
+        File[] optEntries = optDir.listFiles();
+        if (optEntries == null) {
+            return true;
+        }
+
+        for (File entry : optEntries) {
+            if (!entry.isDirectory() || FileUtils.isSymlink(entry) || !entry.getName().startsWith("proton-")) {
+                continue;
+            }
+
+            File sharedProtonDir = new File(ImageFs.getSharedProtonDir(context), entry.getName());
+            if (sharedProtonDir.exists()) {
+                Log.w("ImageFSLegacyMigrator", "Shared Proton already exists; removing duplicate legacy opt entry: " + entry.getName());
+                if (!FileUtils.delete(entry)) {
+                    Log.w("ImageFSLegacyMigrator", "Failed to remove duplicate legacy Proton directory: " + entry.getAbsolutePath());
+                    return false;
+                }
+                continue;
+            }
+
+            if (!entry.renameTo(sharedProtonDir)) {
+                Log.w("ImageFSLegacyMigrator", "Direct move failed for Proton " + entry.getName() + "; falling back to copy+delete.");
+                boolean copied = FileUtils.copy(entry, sharedProtonDir);
+                if (copied) {
+                    FileUtils.delete(entry);
+                    Log.i("ImageFSLegacyMigrator", "Migrated Proton via copy+delete to: " + sharedProtonDir.getAbsolutePath());
+                    continue;
+                }
+                Log.w("ImageFSLegacyMigrator", "Failed to migrate Proton directory: " + entry.getAbsolutePath());
+                return false;
+            }
+
+            Log.i("ImageFSLegacyMigrator", "Migrated Proton via direct move to: " + sharedProtonDir.getAbsolutePath());
+        }
+
+        return true;
     }
 }

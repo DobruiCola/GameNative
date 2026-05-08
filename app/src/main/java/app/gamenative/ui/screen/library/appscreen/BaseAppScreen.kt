@@ -1214,11 +1214,8 @@ abstract class BaseAppScreen {
                 }
             },
             onPauseResumeClick = {
+                isDownloadingState = !isDownloadingState
                 onPauseResumeClick(context, libraryItem)
-                uiScope.launch {
-                    delay(100)
-                    performStateRefresh(false)
-                }
             },
             onDeleteDownloadClick = {
                 onDeleteDownloadClick(context, libraryItem)
