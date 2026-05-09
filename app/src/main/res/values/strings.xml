@@ -290,6 +290,7 @@
     <string name="performance_hud_fps_limiter_target">Target FPS</string>
     <string name="performance_hud_fps_limiter_off">Unlimited</string>
     <string name="performance_hud_fps_limiter_value">%1$d FPS</string>
+    <string name="performance_hud_fps_limiter_lsfg_override">Limiter overridden while LSFG is active. Source rate is paced by the multiplier.</string>
     <string name="performance_hud_presets">Presets</string>
     <string name="performance_hud_presets_description">Quickly switch between common HUD layouts.</string>
     <string name="performance_hud_preset_fps_only">1</string>
@@ -1476,17 +1477,20 @@
     <string name="review_overwhelmingly_negative">Overwhelmingly Negative</string>
     <!-- LSFG Frame Generation -->
     <string name="lsfg_tab_title">LSFG-VK</string>
-    <string name="lsfg_description">Generate intermediate frames using Lossless Scaling\'s Vulkan layer. Only known to work on Adreno 6xx and above.</string>
-    <string name="lsfg_enable">Enable LSFG-VK frame generation</string>
     <string name="lsfg_multiplier">Frame multiplier</string>
     <string name="lsfg_flow_scale">Flow scale</string>
     <string name="lsfg_performance_mode">Performance mode</string>
     <string name="lsfg_not_supported">Frame generation requires a Bionic container</string>
-    <string name="lsfg_install_prompt">Lossless Scaling not installed. Tap to install. Only known to work on Adreno 6xx and above.</string>
-    <string name="lsfg_not_in_library">Lossless Scaling not in your Steam library</string>
-    <string name="lsfg_install_title">Install Lossless Scaling?</string>
-    <string name="lsfg_install_message">This will download Lossless Scaling from Steam to enable frame generation.</string>
-    <string name="lsfg_installing">Downloading Lossless Scaling…</string>
+    <string name="lsfg_dll_unavailable">Lossless.dll not found. Install Lossless Scaling on Steam (auto-downloads when launching a game) or import the DLL in app settings.</string>
+    <string name="lsfg_downloading">Installing Lossless Scaling…</string>
+    <string name="settings_lsfg_title">Lossless Scaling DLL</string>
+    <string name="settings_lsfg_status_imported">Using imported Lossless.dll</string>
+    <string name="settings_lsfg_status_steam">Using Lossless.dll from Steam install</string>
+    <string name="settings_lsfg_status_none">Not available — own LSFG on Steam or import a DLL</string>
+    <string name="settings_lsfg_import_description">Choose a Lossless.dll file. Imported DLLs take precedence over the Steam-installed version.</string>
+    <string name="settings_lsfg_import_dll">Import DLL</string>
+    <string name="settings_lsfg_override_dll">Replace DLL</string>
+    <string name="settings_lsfg_remove_imported">Remove imported</string>
     <string name="lsfg_performance_mode_desc">Reduces quality for higher throughput</string>
     <string name="settings_interface_show_recommendations_title">Show game recommendations</string>
     <string name="settings_interface_show_recommendations_subtitle">Show curated indie game picks in your library. Keeping this on helps support indie developers and GameNative.</string>

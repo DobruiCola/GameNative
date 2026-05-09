@@ -1,5 +1,6 @@
 package app.gamenative.utils
 
+import android.content.Context
 import com.winlator.container.Container
 import java.util.Locale
 
@@ -11,8 +12,13 @@ object LsfgQuickMenuHelper {
         val performanceMode: Boolean,
     )
 
-    fun isAvailable(container: Container): Boolean =
-        LsfgVkManager.isSupported(container) && LsfgVkManager.isArmed(container)
+    /** Whether the LSFG quick-menu tab should be shown for this container. */
+    fun shouldShowTab(container: Container): Boolean =
+        LsfgVkManager.isSupported(container)
+
+    /** Whether the LSFG controls should be active (DLL is reachable). */
+    fun isControlActive(context: Context, container: Container): Boolean =
+        LsfgVkManager.isSupported(container) && LsfgVkManager.isDllAvailable(context)
 
     fun readSettings(container: Container): Settings = Settings(
         multiplier = LsfgVkManager.multiplier(container),

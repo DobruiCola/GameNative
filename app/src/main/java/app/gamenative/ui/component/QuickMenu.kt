@@ -254,8 +254,9 @@ fun QuickMenu(
     isTouchscreenModeActive: Boolean = false,
     onTouchGestureSettingsClick: () -> Unit = {},
     activeToggleIds: Set<Int> = emptySet(),
-    // LSFG hot-reload state (tab only visible when isLsfgAvailable)
-    isLsfgAvailable: Boolean = false,
+    // LSFG: tab visible on Bionic; controls disabled when no DLL is reachable.
+    isLsfgTabVisible: Boolean = false,
+    isLsfgControlActive: Boolean = false,
     lsfgMultiplier: Int = 2,
     lsfgFlowScale: Float = 0.80f,
     lsfgPerformanceMode: Boolean = true,
@@ -326,7 +327,7 @@ fun QuickMenu(
 
     var selectedTab by rememberSaveable {
         mutableIntStateOf(
-            if (PrefManager.quickMenuLastTab == QuickMenuTab.LSFG && !isLsfgAvailable)
+            if (PrefManager.quickMenuLastTab == QuickMenuTab.LSFG && !isLsfgTabVisible)
                 QuickMenuTab.HUD
             else PrefManager.quickMenuLastTab
         )
@@ -462,7 +463,7 @@ fun QuickMenu(
                                     modifier = Modifier.width(56.dp),
                                     focusRequester = hudTabFocusRequester,
                                 )
-                                if (isLsfgAvailable) {
+                                if (isLsfgTabVisible) {
                                     QuickMenuTabButton(
                                         icon = Icons.Default.Speed,
                                         contentDescriptionResId = R.string.lsfg_tab_title,
@@ -565,6 +566,7 @@ fun QuickMenu(
                                             fpsLimiterEnabled = fpsLimiterEnabled,
                                             fpsLimiterTarget = fpsLimiterTarget,
                                             fpsLimiterMax = fpsLimiterMax,
+                                            lsfgMultiplier = if (isLsfgControlActive) lsfgMultiplier else 0,
                                             onTogglePerformanceHud = {
                                                 onItemSelected(QuickMenuAction.PERFORMANCE_HUD)
                                             },
@@ -579,6 +581,7 @@ fun QuickMenu(
 
                                     QuickMenuTab.LSFG -> {
                                         LsfgQuickMenuTab(
+                                            controlsActive = isLsfgControlActive,
                                             multiplier = lsfgMultiplier,
                                             flowScale = lsfgFlowScale,
                                             performanceMode = lsfgPerformanceMode,
@@ -740,6 +743,7 @@ private fun PerformanceHudQuickMenuTab(
     fpsLimiterEnabled: Boolean,
     fpsLimiterTarget: Int,
     fpsLimiterMax: Int,
+    lsfgMultiplier: Int,
     onTogglePerformanceHud: () -> Unit,
     onPerformanceHudConfigChanged: (PerformanceHudConfig) -> Unit,
     onFpsLimiterEnabledChanged: (Boolean) -> Unit,
@@ -757,16 +761,25 @@ private fun PerformanceHudQuickMenuTab(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         // ── FPS Limiter (topmost) ────────────────────────────────────────
+        // When LSFG framegen is active, the limiter is fully bypassed (LSFG paces
+        // the source via FIFO). The toggle is forced off and made non-interactive
+        // so the UI matches the runtime behaviour.
+        val limiterControlledByLsfg = lsfgMultiplier >= 2
         QuickMenuToggleRow(
             title = stringResource(R.string.performance_hud_fps_limiter),
-            enabled = fpsLimiterEnabled,
-            onToggle = { onFpsLimiterEnabledChanged(!fpsLimiterEnabled) },
+            subtitle = if (limiterControlledByLsfg) {
+                stringResource(R.string.performance_hud_fps_limiter_lsfg_override)
+            } else null,
+            enabled = fpsLimiterEnabled && !limiterControlledByLsfg,
+            onToggle = {
+                if (!limiterControlledByLsfg) onFpsLimiterEnabledChanged(!fpsLimiterEnabled)
+            },
             accentColor = accentColor,
             focusRequester = focusRequester,
         )
 
         AnimatedVisibility(
-            visible = fpsLimiterEnabled,
+            visible = fpsLimiterEnabled && !limiterControlledByLsfg,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut(),
         ) {
@@ -1074,6 +1087,7 @@ private fun PerformanceHudQuickMenuTab(
 
 @Composable
 private fun LsfgQuickMenuTab(
+    controlsActive: Boolean,
     multiplier: Int,
     flowScale: Float,
     performanceMode: Boolean,
@@ -1085,7 +1099,7 @@ private fun LsfgQuickMenuTab(
     modifier: Modifier = Modifier,
 ) {
     val accentColor = PluviaTheme.colors.accentPurple
-    val isEnabled = multiplier >= 2
+    val isEnabled = controlsActive && multiplier >= 2
 
     Column(
         modifier = modifier
@@ -1093,6 +1107,15 @@ private fun LsfgQuickMenuTab(
             .focusGroup(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        if (!controlsActive) {
+            Text(
+                text = stringResource(R.string.lsfg_dll_unavailable),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+
         // ── Multiplier (Off / 2x / 3x / 4x) ───────────────────────────────
         QuickMenuSectionHeader(
             title = stringResource(R.string.lsfg_multiplier),
@@ -1106,7 +1129,7 @@ private fun LsfgQuickMenuTab(
                     text = if (value == 0) "Off" else "${value}x",
                     selected = multiplier == value || (value == 0 && multiplier < 2),
                     accentColor = accentColor,
-                    onClick = { onMultiplierChanged(value) },
+                    onClick = { if (controlsActive) onMultiplierChanged(value) },
                     modifier = Modifier.width(56.dp),
                     focusRequester = if (value == 0) focusRequester else null,
                 )
@@ -1456,6 +1479,7 @@ private fun QuickMenuAdjustmentRow(
     accentColor: Color,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
+    subtitle: String? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -1572,6 +1596,15 @@ private fun QuickMenuAdjustmentRow(
                     )
                 }
             }
+        }
+
+        if (subtitle != null) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         Spacer(modifier = Modifier.height(10.dp))

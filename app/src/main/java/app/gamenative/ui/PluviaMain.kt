@@ -91,6 +91,7 @@ import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.util.SnackbarManager
 import app.gamenative.utils.BestConfigService
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.LsfgVkManager
 import app.gamenative.utils.PlatformAuthUtils
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ManifestInstaller
@@ -2021,6 +2022,36 @@ fun preLaunchApp(
             } catch (e: Exception) {
                 Timber.tag("Workshop").e(e, "Workshop mod sync failed, continuing without mods")
             }
+        }
+
+        // LSFG auto-download: if the user owns Lossless Scaling but it isn't installed
+        // yet, kick off a one-time install so framegen is available next launch. Mirrors
+        // the workshop flow — blocks the launch only while the download is actually
+        // making progress, and bails out cleanly on offline / missing connection.
+        try {
+            val ownsLsfg = LsfgVkManager.ownsLosslessScaling()
+            val dllAvailable = LsfgVkManager.isDllAvailable(context)
+            if (ownsLsfg && !dllAvailable && !isOffline &&
+                SteamService.isConnected && SteamService.isLoggedIn) {
+                val lsfgDownload = SteamService.downloadApp(LsfgVkManager.LOSSLESS_SCALING_APP_ID)
+                if (lsfgDownload != null) {
+                    Timber.tag("LSFG").i("Auto-downloading Lossless Scaling")
+                    setLoadingMessage(context.getString(R.string.lsfg_downloading))
+                    setLoadingProgress(lsfgDownload.getProgress().coerceIn(0f, 1f))
+                    val progressListener: (Float) -> Unit = { p ->
+                        setLoadingProgress(p.coerceIn(0f, 1f))
+                    }
+                    lsfgDownload.addProgressListener(progressListener)
+                    try {
+                        lsfgDownload.awaitCompletion(timeoutMs = 30L * 60L * 1000L)
+                    } finally {
+                        lsfgDownload.removeProgressListener(progressListener)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Don't block game launch if the auto-download fails — LSFG just stays off.
+            Timber.tag("LSFG").w(e, "LSFG auto-download skipped/failed")
         }
 
         setLoadingMessage("Syncing cloud saves")

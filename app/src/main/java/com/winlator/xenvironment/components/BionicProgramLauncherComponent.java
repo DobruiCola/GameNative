@@ -317,8 +317,8 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
 
         if (LsfgVkManager.isSupported(container)) {
             LsfgVkManager.ensureRuntimeInstalled(environment.getContext(), container);
-            LsfgVkManager.writeConfig(container);
-            LsfgVkManager.applyLaunchEnv(container, envVars);
+            LsfgVkManager.writeConfig(environment.getContext(), container);
+            LsfgVkManager.applyLaunchEnv(environment.getContext(), container, envVars);
         }
 
         Log.d("BionicProgramLauncherComponent", "env vars are " + envVars.toString());

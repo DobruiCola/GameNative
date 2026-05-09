@@ -35,13 +35,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class PresentExtension implements Extension {
     public static final byte MAJOR_OPCODE = -103;
-    private static final int FAKE_INTERVAL_DEFAULT_US = 1_000_000 / 60;
     public enum Kind {PIXMAP, MSC_NOTIFY}
     public enum Mode {COPY, FLIP, SKIP}
     private final SparseArray<Event> events = new SparseArray<>();
     private SyncExtension syncExtension;
     private byte firstEventId = 0;
     private byte firstErrorId = 0;
+
+    // Synthetic MSC tick interval. Defaults to 60Hz but should be updated to the
+    // actual display refresh rate via setDisplayRefreshHz so games using MSC deltas
+    // for timing get a counter that matches the real present cadence.
+    private volatile long mscIntervalUs = 1_000_000L / 60;
 
     // FPS limiter: delays PresentIdleNotify/PresentCompleteNotify to create
     // back-pressure on the game's render loop. Without this the game ignores the
@@ -67,6 +71,12 @@ public class PresentExtension implements Extension {
             lastScheduledUst = 0L; // reset pacing watermark on every change
         }
         limitGeneration.incrementAndGet(); // invalidate any in-flight scheduled notifies
+    }
+
+    public void setDisplayRefreshHz(float refreshHz) {
+        if (refreshHz > 1f && Float.isFinite(refreshHz)) {
+            mscIntervalUs = (long) (1_000_000.0f / refreshHz);
+        }
     }
 
     public void close() {
@@ -196,7 +206,7 @@ public class PresentExtension implements Extension {
 
         if (targetInterval <= 0L) {
             // No limit — fire immediately as before.
-            long msc = nowUst / FAKE_INTERVAL_DEFAULT_US;
+            long msc = nowUst / mscIntervalUs;
             sendIdleNotify(window, pixmap, serial, idleFence);
             sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, nowUst, msc);
         } else {
@@ -205,7 +215,7 @@ public class PresentExtension implements Extension {
             long delayUs = scheduledUst - nowUst;
 
             if (delayUs <= 1_000L) {
-                long msc = scheduledUst / FAKE_INTERVAL_DEFAULT_US;
+                long msc = scheduledUst / mscIntervalUs;
                 sendIdleNotify(window, pixmap, serial, idleFence);
                 sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, scheduledUst, msc);
             } else {
@@ -218,7 +228,7 @@ public class PresentExtension implements Extension {
                 presentScheduler.schedule(() -> {
                     try {
                         if (limitGeneration.get() == capturedGen) {
-                            long msc = finalScheduledUst / FAKE_INTERVAL_DEFAULT_US;
+                            long msc = finalScheduledUst / mscIntervalUs;
                             sendIdleNotify(finalWindow, finalPixmap, finalSerial, finalIdleFence);
                             sendCompleteNotify(finalWindow, finalSerial, Kind.PIXMAP, Mode.COPY,
                                     finalScheduledUst, msc);
@@ -228,7 +238,7 @@ public class PresentExtension implements Extension {
                             long ustNow = System.nanoTime() / 1000;
                             sendIdleNotify(finalWindow, finalPixmap, finalSerial, finalIdleFence);
                             sendCompleteNotify(finalWindow, finalSerial, Kind.PIXMAP, Mode.COPY,
-                                    ustNow, ustNow / FAKE_INTERVAL_DEFAULT_US);
+                                    ustNow, ustNow / mscIntervalUs);
                         }
                     } catch (Exception ignored) {
                         // Client may have disconnected before the scheduled notify fired.

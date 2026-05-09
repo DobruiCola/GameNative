@@ -442,8 +442,11 @@ fun XServerScreen(
     var fpsLimiterEnabled by rememberSaveable(container.id) { mutableStateOf(initialFpsLimiterEnabled(container)) }
     var fpsLimiterTarget by rememberSaveable(container.id) { mutableIntStateOf(initialFpsLimiterTarget(container)) }
 
-    // LSFG tab in QuickMenu only visible when enabled in container settings
-    val isLsfgAvailable = LsfgQuickMenuHelper.isAvailable(container)
+    // LSFG quick-menu tab is visible whenever the container is Bionic. Inside the
+    // tab, controls are only active when a Lossless.dll is reachable (Steam install
+    // for app 993090 or imported via app settings).
+    val isLsfgTabVisible = LsfgQuickMenuHelper.shouldShowTab(container)
+    val isLsfgControlActive = LsfgQuickMenuHelper.isControlActive(context, container)
     val initialLsfgSettings = remember(container.id) { LsfgQuickMenuHelper.readSettings(container) }
     var lsfgMultiplier by rememberSaveable(container.id) { mutableIntStateOf(initialLsfgSettings.multiplier) }
     var lsfgFlowScale by rememberSaveable(container.id) { mutableStateOf(initialLsfgSettings.flowScale) }
@@ -522,11 +525,19 @@ fun XServerScreen(
         }
     }
 
+    // The LSFG-VK Android port has no inter-frame pacing in its present loop —
+    // only FIFO inside the wrapper Vulkan swapchain spreads its multiplier-many
+    // PresentPixmap calls across panel vsyncs. Any external limiter that paces
+    // below panel rate forces idle gaps between LSFG's bursts and the panel
+    // shows stale frames during those gaps (visible as judder). So when LSFG is
+    // armed we hand pacing entirely to FIFO + wrapper backpressure: source rate
+    // settles at panel_rate / multiplier naturally, no external cap.
     fun applyFpsLimiterToEngines(limit: Int) {
-        xServerView?.setFrameRateLimit(limit)
+        val effective = if (isLsfgControlActive && lsfgMultiplier >= 2) 0 else limit
+        xServerView?.setFrameRateLimit(effective)
         xServerView?.getxServer()
             ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
-            ?.setFrameRateLimit(limit)
+            ?.setFrameRateLimit(effective)
     }
 
     fun applyFpsLimiterEnabled(enabled: Boolean) {
@@ -554,6 +565,7 @@ fun XServerScreen(
     fun applyLsfgMultiplier(mult: Int) {
         lsfgMultiplier = LsfgQuickMenuHelper.sanitizeMultiplier(mult)
         applyLsfgSettings()
+        applyFpsLimiterToEngines(if (fpsLimiterEnabled) fpsLimiterTarget else 0)
     }
 
     fun applyLsfgFlowScale(scale: Float) {
@@ -573,8 +585,10 @@ fun XServerScreen(
         if (clampedTarget != fpsLimiterTarget) {
             fpsLimiterTarget = clampedTarget
         }
-        val appliedLimit = if (fpsLimiterEnabled) clampedTarget else 0
-        applyFpsLimiterToEngines(appliedLimit)
+        xServerView?.getxServer()
+            ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
+            ?.setDisplayRefreshHz(detectedMax.toFloat())
+        applyFpsLimiterToEngines(if (fpsLimiterEnabled) clampedTarget else 0)
     }
 
     fun restorePerformanceHudPosition() {
@@ -648,7 +662,9 @@ fun XServerScreen(
         val hud = PerformanceHudView(
             context = context,
             fpsProvider = {
-                frameRating?.currentFPS ?: 0f
+                val raw = frameRating?.currentFPS ?: 0f
+                val mult = if (isLsfgControlActive && lsfgMultiplier >= 2) lsfgMultiplier else 1
+                raw * mult
             },
             initialConfig = performanceHudConfig,
             initialCompactMode = PrefManager.performanceHudCompactMode,
@@ -2387,8 +2403,9 @@ fun XServerScreen(
                 if (isTouchscreenModeActive) add(QuickMenuAction.TOUCHSCREEN_MODE)
                 if (isDisableMouseInput) add(QuickMenuAction.DISABLE_MOUSE)
             },
-            // LSFG hot-reload (tab only visible when enabled in container settings)
-            isLsfgAvailable = isLsfgAvailable,
+            // LSFG: tab visible on Bionic; controls disabled when no DLL is reachable.
+            isLsfgTabVisible = isLsfgTabVisible,
+            isLsfgControlActive = isLsfgControlActive,
             lsfgMultiplier = lsfgMultiplier,
             lsfgFlowScale = lsfgFlowScale,
             lsfgPerformanceMode = lsfgPerformanceMode,
@@ -3072,6 +3089,11 @@ private fun setupXEnvironment(
         guestProgramLauncherComponent.setSteamType(container.getSteamType())
 
         envVars.putAll(container.envVars)
+        // Frame pacing is owned by the in-app FPS limiter (PresentExtension). Stripping these
+        // here prevents any persisted/legacy values from creating a second cap that fights
+        // with the runtime limiter (and with LSFG's frame generation pacing).
+        envVars.remove("DXVK_FRAME_RATE")
+        envVars.remove("VKD3D_FRAME_RATE")
         if (!envVars.has("WINEESYNC")) envVars.put("WINEESYNC", "1")
         val graphicsDriverConfig = KeyValueSet(container.getGraphicsDriverConfig())
         if (graphicsDriverConfig.get("version").lowercase(Locale.getDefault()).contains("gen8")) {
