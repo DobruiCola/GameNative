@@ -584,9 +584,6 @@ fun XServerScreen(
         if (clampedTarget != fpsLimiterTarget) {
             fpsLimiterTarget = clampedTarget
         }
-        xServerView?.getxServer()
-            ?.getExtension<PresentExtension>(PresentExtension.MAJOR_OPCODE.toInt())
-            ?.setDisplayRefreshHz(detectedMax.toFloat())
         applyFpsLimiterToEngines(if (fpsLimiterEnabled) clampedTarget else 0)
     }
 
