@@ -304,6 +304,7 @@
     <string name="performance_hud_fps_limiter_target">FPS țintă</string>
     <string name="performance_hud_fps_limiter_off">Nelimitat</string>
     <string name="performance_hud_fps_limiter_value">%1$d FPS</string>
+    <string name="performance_hud_fps_limiter_lsfg_override">Limitatorul este ignorat cât timp LSFG este activ. Rata sursei este controlată de multiplicator.</string>
     <string name="performance_hud_presets">Presetări</string>
     <string name="performance_hud_presets_description">Comută rapid între aspecte HUD comune.</string>
     <string name="performance_hud_preset_fps_only">1</string>
@@ -1433,16 +1434,12 @@
 
     <!-- LSFG-VK frame generation -->
     <string name="lsfg_tab_title">LSFG-VK</string>
-    <string name="lsfg_description">Generare cadre intermediare folosind stratul Vulkan din Lossless Scaling. Se știe că funcționează doar pe Adreno 6xx și mai nou.</string>
-    <string name="lsfg_enable">Activează generarea de cadre LSFG-VK</string>
     <string name="lsfg_multiplier">Multiplicator cadre</string>
     <string name="lsfg_flow_scale">Scară flux</string>
+    <string name="lsfg_flow_scale_desc">Mai mic este mai stabil; mai mare este mai fluid, dar poate produce artefacte.</string>
     <string name="lsfg_performance_mode">Mod performanță</string>
     <string name="lsfg_not_supported">Generarea de cadre necesită un container Bionic</string>
-    <string name="lsfg_install_prompt">Lossless Scaling nu este instalat. Atingeți pentru a instala. Se știe că funcționează doar pe Adreno 6xx și mai nou.</string>
-    <string name="lsfg_not_in_library">Lossless Scaling nu este în biblioteca dumneavoastră Steam</string>
-    <string name="lsfg_install_title">Instalați Lossless Scaling?</string>
-    <string name="lsfg_install_message">Aceasta va descărca Lossless Scaling din Steam pentru a activa generarea de cadre.</string>
-    <string name="lsfg_installing">Se descarcă Lossless Scaling…</string>
     <string name="lsfg_performance_mode_desc">Reduce calitatea pentru un debit mai mare</string>
+    <string name="lsfg_dll_unavailable">LSFG nu este instalat - trebuie să îl deții pe Steam.</string>
+    <string name="lsfg_downloading">Se instalează Lossless Scaling…</string>
 </resources>

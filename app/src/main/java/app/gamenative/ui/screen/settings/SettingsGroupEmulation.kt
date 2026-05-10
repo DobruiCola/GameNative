@@ -5,7 +5,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -17,13 +16,11 @@ import app.gamenative.R
 import app.gamenative.ui.component.dialog.Box64PresetsDialog
 import app.gamenative.ui.component.dialog.ContainerConfigDialog
 import app.gamenative.ui.component.dialog.FEXCorePresetsDialog
-import app.gamenative.ui.component.dialog.LsfgDllImportDialog
 import app.gamenative.ui.component.dialog.OrientationDialog
 import app.gamenative.ui.theme.PluviaTheme
 import app.gamenative.ui.theme.settingsTileColors
 import app.gamenative.ui.theme.settingsTileColorsAlt
 import app.gamenative.utils.ContainerUtils
-import app.gamenative.utils.LsfgVkManager
 import com.alorma.compose.settings.ui.SettingsGroup
 import com.alorma.compose.settings.ui.SettingsMenuLink
 import com.alorma.compose.settings.ui.SettingsSwitch
@@ -135,34 +132,6 @@ fun SettingsGroupEmulation() {
             subtitle = { Text(text = stringResource(R.string.settings_emulation_wine_proton_manager_subtitle)) },
             onClick = { showWineProtonManager = true },
         )
-
-        val context = LocalContext.current
-        var showLsfgImportDialog by rememberSaveable { mutableStateOf(false) }
-        // Re-read on every recomposition triggered by the dialog so the subtitle updates
-        // immediately after import/remove. Using a key tied to dialog visibility is enough.
-        var lsfgRefreshKey by rememberSaveable { mutableStateOf(0) }
-        val lsfgStatus = remember(lsfgRefreshKey) { LsfgVkManager.resolveDll(context) }
-        val lsfgSubtitle = stringResource(
-            when (lsfgStatus.source) {
-                LsfgVkManager.DllSource.IMPORTED -> R.string.settings_lsfg_status_imported
-                LsfgVkManager.DllSource.STEAM -> R.string.settings_lsfg_status_steam
-                LsfgVkManager.DllSource.NONE -> R.string.settings_lsfg_status_none
-            },
-        )
-        SettingsMenuLink(
-            colors = settingsTileColors(),
-            title = { Text(text = stringResource(R.string.settings_lsfg_title)) },
-            subtitle = { Text(text = lsfgSubtitle) },
-            onClick = { showLsfgImportDialog = true },
-        )
-        if (showLsfgImportDialog) {
-            LsfgDllImportDialog(
-                onDismiss = {
-                    showLsfgImportDialog = false
-                    lsfgRefreshKey++
-                },
-            )
-        }
     }
 }
 

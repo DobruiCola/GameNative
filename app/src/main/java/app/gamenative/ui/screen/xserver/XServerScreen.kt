@@ -443,11 +443,14 @@ fun XServerScreen(
     var fpsLimiterTarget by rememberSaveable(container.id) { mutableIntStateOf(initialFpsLimiterTarget(container)) }
 
     // LSFG quick-menu tab is visible whenever the container is Bionic. Inside the
-    // tab, controls are only active when a Lossless.dll is reachable (Steam install
-    // for app 993090 or imported via app settings).
+    // tab, controls are only active when a Steam-provided Lossless.dll is reachable.
     val isLsfgTabVisible = LsfgQuickMenuHelper.shouldShowTab(container)
     val isLsfgControlActive = LsfgQuickMenuHelper.isControlActive(context, container)
-    val initialLsfgSettings = remember(container.id) { LsfgQuickMenuHelper.readSettings(container) }
+    val initialLsfgSettings = remember(container.id) {
+        // Session default only: start each launch with LSFG off.
+        container.putExtra("lsfgMultiplier", "0")
+        LsfgQuickMenuHelper.readSettings(container)
+    }
     var lsfgMultiplier by rememberSaveable(container.id) { mutableIntStateOf(initialLsfgSettings.multiplier) }
     var lsfgFlowScale by rememberSaveable(container.id) { mutableStateOf(initialLsfgSettings.flowScale) }
     var lsfgPerformanceMode by rememberSaveable(container.id) { mutableStateOf(initialLsfgSettings.performanceMode) }

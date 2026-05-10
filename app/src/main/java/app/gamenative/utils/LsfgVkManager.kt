@@ -21,9 +21,8 @@ import kotlin.jvm.JvmStatic
  *   multiplier >= 2, AND a Lossless.dll is reachable. There is no separate
  *   master toggle — the multiplier is the on/off switch.
  *
- * DLL resolution priority:
- *   1. Imported DLL at <filesDir>/lsfg/Lossless.dll (set via app settings).
- *   2. Steam install dir for app 993090 (auto-downloaded when owned).
+ * DLL source:
+ *   Steam install dir for app 993090 (auto-downloaded when owned).
  */
 object LsfgVkManager {
     private const val TAG = "LsfgVkManager"
@@ -62,14 +61,6 @@ object LsfgVkManager {
     private const val ASSET_LIB = "$ASSET_DIR/$LIB_FILENAME"
     private const val ASSET_MANIFEST = "$ASSET_DIR/$MANIFEST_FILENAME"
 
-    private const val IMPORTED_DLL_DIR = "lsfg"
-
-    // ---- Source enum -------------------------------------------------------
-
-    enum class DllSource { IMPORTED, STEAM, NONE }
-
-    data class DllResolution(val source: DllSource, val file: File?)
-
     // ---- Public API --------------------------------------------------------
 
     /** Whether LSFG is supported for this container's variant. */
@@ -77,18 +68,10 @@ object LsfgVkManager {
     fun isSupported(container: Container): Boolean =
         container.containerVariant.equals(Container.BIONIC, ignoreCase = true)
 
-    /** Resolve the active DLL: imported takes precedence over Steam install. */
-    @JvmStatic
-    fun resolveDll(context: Context): DllResolution {
-        importedDllFile(context)?.let { return DllResolution(DllSource.IMPORTED, it) }
-        steamDllFile()?.let { return DllResolution(DllSource.STEAM, it) }
-        return DllResolution(DllSource.NONE, null)
-    }
-
-    /** Whether any Lossless.dll (imported or Steam) is reachable. */
+    /** Whether a Steam-provided Lossless.dll is reachable. */
     @JvmStatic
     fun isDllAvailable(context: Context): Boolean =
-        resolveDll(context).file != null
+        steamDllFile() != null
 
     /** Whether the user owns Lossless Scaling in their Steam library. */
     @JvmStatic
@@ -117,39 +100,6 @@ object LsfgVkManager {
     fun containerDllPath(container: Container): String? {
         val dllFile = File(container.rootDir, "$DLL_RELATIVE_DIR/$LOSSLESS_DLL_NAME")
         return dllFile.absolutePath.takeIf { dllFile.isFile }
-    }
-
-    // ---- Imported DLL management ------------------------------------------
-
-    private fun importedDllDir(context: Context): File =
-        File(context.filesDir, IMPORTED_DLL_DIR)
-
-    /** File handle for the imported DLL, or null if not present. */
-    @JvmStatic
-    fun importedDllFile(context: Context): File? {
-        val f = File(importedDllDir(context), LOSSLESS_DLL_NAME)
-        return f.takeIf { it.isFile && it.length() > 0L }
-    }
-
-    /** Copy bytes from [source] into the imported DLL location, replacing any existing. */
-    @JvmStatic
-    fun importDll(context: Context, source: java.io.InputStream): Boolean = try {
-        val dir = importedDllDir(context).apply { mkdirs() }
-        val target = File(dir, LOSSLESS_DLL_NAME)
-        target.outputStream().use { out -> source.copyTo(out) }
-        FileUtils.chmod(target, 0b110100100)
-        Timber.tag(TAG).i("Imported Lossless.dll (%d bytes)", target.length())
-        true
-    } catch (t: Throwable) {
-        Timber.tag(TAG).e(t, "Failed to import Lossless.dll")
-        false
-    }
-
-    /** Delete the imported DLL, returning true if it existed. */
-    @JvmStatic
-    fun removeImportedDll(context: Context): Boolean {
-        val f = File(importedDllDir(context), LOSSLESS_DLL_NAME)
-        return f.exists() && f.delete()
     }
 
     // ---- Launch-time installation -----------------------------------------
@@ -207,8 +157,8 @@ object LsfgVkManager {
             }
         }
 
-        // Copy the resolved DLL into the container so the layer can find it.
-        val resolvedDll = resolveDll(context).file
+        // Copy the Steam DLL into the container so the layer can find it.
+        val resolvedDll = steamDllFile()
         val targetDll = File(dllDir, LOSSLESS_DLL_NAME)
         if (resolvedDll != null) {
             try {

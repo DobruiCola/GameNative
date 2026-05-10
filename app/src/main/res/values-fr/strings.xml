@@ -302,6 +302,7 @@
     <string name="performance_hud_fps_limiter_target">FPS cible</string>
     <string name="performance_hud_fps_limiter_off">Illimité</string>
     <string name="performance_hud_fps_limiter_value">%1$d FPS</string>
+    <string name="performance_hud_fps_limiter_lsfg_override">Limiteur ignoré tant que LSFG est actif. La fréquence source est contrôlée par le multiplicateur.</string>
     <string name="performance_hud_presets">Préréglages</string>
     <string name="performance_hud_presets_description">Basculer rapidement entre des dispositions HUD courantes.</string>
     <string name="performance_hud_preset_fps_only">1</string>
@@ -1428,16 +1429,12 @@
 
     <!-- LSFG-VK frame generation -->
     <string name="lsfg_tab_title">LSFG-VK</string>
-    <string name="lsfg_description">Générer des images intermédiaires avec le layer Vulkan de Lossless Scaling. Fonctionne uniquement sur Adreno 6xx et supérieur, à notre connaissance.</string>
-    <string name="lsfg_enable">Activer la génération d\'images LSFG-VK</string>
     <string name="lsfg_multiplier">Multiplicateur d\'images</string>
     <string name="lsfg_flow_scale">Échelle de flux</string>
+    <string name="lsfg_flow_scale_desc">Plus bas = plus stable ; plus élevé = plus fluide mais peut créer des artefacts.</string>
     <string name="lsfg_performance_mode">Mode performance</string>
     <string name="lsfg_not_supported">La génération d\'images nécessite un conteneur Bionic</string>
-    <string name="lsfg_install_prompt">Lossless Scaling n\'est pas installé. Appuyez pour installer. Fonctionne uniquement sur Adreno 6xx et supérieur, à notre connaissance.</string>
-    <string name="lsfg_not_in_library">Lossless Scaling n\'est pas dans votre bibliothèque Steam</string>
-    <string name="lsfg_install_title">Installer Lossless Scaling ?</string>
-    <string name="lsfg_install_message">Cela téléchargera Lossless Scaling depuis Steam pour activer la génération d\'images.</string>
-    <string name="lsfg_installing">Téléchargement de Lossless Scaling…</string>
     <string name="lsfg_performance_mode_desc">Réduit la qualité pour un débit plus élevé</string>
+    <string name="lsfg_dll_unavailable">LSFG n’est pas installé - vous devez le posséder sur Steam.</string>
+    <string name="lsfg_downloading">Installation de Lossless Scaling…</string>
 </resources>
