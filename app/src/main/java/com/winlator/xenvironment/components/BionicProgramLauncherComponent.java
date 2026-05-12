@@ -640,11 +640,10 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
                           "SteamBootstrap.prepareApp(" + appIdInt + ") with "
                           + dlcAppIds.length + " owned DLC(s)");
                     app.gamenative.SteamBootstrap.INSTANCE.prepareApp(appIdInt, dlcAppIds);
-                    app.gamenative.SteamBootstrap.INSTANCE.setCloudEnabled(appIdInt, false);
                 } catch (NumberFormatException nfe) {
                     Log.w("BionicProgramLauncherComponent",
                           "steamAppId=" + steamAppId + " is not numeric; "
-                          + "skipping SteamBootstrap.prepareApp / setCloudEnabled");
+                          + "skipping SteamBootstrap.prepareApp");
                 }
             }
         } catch (Throwable t) {

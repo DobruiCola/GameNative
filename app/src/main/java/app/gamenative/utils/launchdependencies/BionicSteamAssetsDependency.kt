@@ -5,8 +5,10 @@ import app.gamenative.data.GameSource
 import app.gamenative.service.SteamService
 import app.gamenative.utils.LOADING_PROGRESS_UNKNOWN
 import com.winlator.container.Container
+import com.winlator.contents.ContentsManager
 import com.winlator.core.FileUtils
 import com.winlator.core.TarCompressorUtils
+import com.winlator.core.WineInfo
 import com.winlator.xenvironment.ImageFs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -32,17 +34,31 @@ object BionicSteamAssetsDependency : LaunchDependency {
     private const val LSTEAMCLIENT_DLL = "lsteamclient.dll"
     private const val LIBSTEAMCLIENT_SO = "libsteamclient.so"
 
-    private const val PROTON_ARM64EC = "proton-9.0-arm64ec"
-    private const val PROTON_X86_64 = "proton-9.0-x86_64"
-
     private fun lsteamclientArchiveFor(container: Container): String? = when {
-        container.wineVersion.contains(PROTON_ARM64EC) -> "lsteamclient-arm64ec.tzst"
-        container.wineVersion.contains(PROTON_X86_64) -> "lsteamclient-x86_64.tzst"
+        container.wineVersion.contains("arm64ec") -> "lsteamclient-arm64ec.tzst"
+        container.wineVersion.contains("x86_64") -> "lsteamclient-x86_64.tzst"
         else -> null
     }
 
     private fun system32SrcArchDir(container: Container): String =
         if (container.wineVersion.contains("arm64ec")) "aarch64-windows" else "x86_64-windows"
+
+    /**
+     * Resolves the actual Wine/Proton install directory for the container.
+     * imageFs.winePath is not initialized yet at dependency-install time
+     * (it's set later in XServerScreen via setWinePath), so we resolve it
+     * the same way XServerScreen does — through WineInfo.fromIdentifier.
+     */
+    private fun wineInstallDir(context: Context, container: Container): File {
+        val contentsManager = ContentsManager(context).also { it.syncContents() }
+        val wineInfo = WineInfo.fromIdentifier(context, contentsManager, container.wineVersion)
+        val path = wineInfo.path
+        return if (!path.isNullOrEmpty()) {
+            File(path)
+        } else {
+            File(ImageFs.find(context).rootDir, "opt/wine")
+        }
+    }
 
     private fun system32Dll(imageFs: ImageFs): File =
         File(imageFs.rootDir, ImageFs.WINEPREFIX + "/drive_c/windows/system32/" + LSTEAMCLIENT_DLL)
@@ -117,8 +133,10 @@ object BionicSteamAssetsDependency : LaunchDependency {
                 callbacks.setLoadingMessage("Extracting lsteamclient")
                 callbacks.setLoadingProgress(LOADING_PROGRESS_UNKNOWN)
                 withContext(Dispatchers.IO) {
-                    val wineLibDir = File(imageFs.winePath, "lib/wine/")
+                    val wineDir = wineInstallDir(context, container)
+                    val wineLibDir = File(wineDir, "lib/wine/")
                     wineLibDir.mkdirs()
+                    Timber.i("Extracting $lsteamclientArchive into ${wineLibDir.absolutePath}")
                     val ok = TarCompressorUtils.extract(
                         TarCompressorUtils.Type.ZSTD,
                         archiveCache,
@@ -128,8 +146,8 @@ object BionicSteamAssetsDependency : LaunchDependency {
                         throw IllegalStateException("Failed to extract $lsteamclientArchive into ${wineLibDir.absolutePath}")
                     }
 
-                    val sys32Src = File(imageFs.winePath, "lib/wine/${system32SrcArchDir(container)}/$LSTEAMCLIENT_DLL")
-                    val sysWowSrc = File(imageFs.winePath, "lib/wine/i386-windows/$LSTEAMCLIENT_DLL")
+                    val sys32Src = File(wineLibDir, "${system32SrcArchDir(container)}/$LSTEAMCLIENT_DLL")
+                    val sysWowSrc = File(wineLibDir, "i386-windows/$LSTEAMCLIENT_DLL")
                     dllSystem32.parentFile?.mkdirs()
                     dllSyswow64.parentFile?.mkdirs()
                     if (!FileUtils.copy(sys32Src, dllSystem32)) {

@@ -4984,6 +4984,17 @@ private fun extractSteamFiles(
         } catch (e: IOException) {
             Timber.e(e, "Failed to copy cached steam.exe")
         }
+
+        val steamDir = steamExe.parentFile ?: return
+        for (dllName in listOf("steam_api.dll", "steam_api64.dll")) {
+            try {
+                context.assets.open("steampipe/$dllName").use { input ->
+                    Files.copy(input, File(steamDir, dllName).toPath(), REPLACE_EXISTING)
+                }
+            } catch (e: IOException) {
+                Timber.e(e, "Failed to copy $dllName to Steam folder")
+            }
+        }
     }
 }
 
