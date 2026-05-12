@@ -2173,6 +2173,7 @@ fun XServerScreen(
             frameRating = FrameRating(context)
             frameRating?.setVisibility(View.GONE)
             xServerView.renderer.setFrameRating(frameRating)
+            shouldTrackDisplayedFrames.set(true)
 
             if (isPerformanceHudEnabled) {
                 frameLayout.post {
