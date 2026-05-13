@@ -5004,24 +5004,21 @@ private fun extractSteamFiles(
             Timber.e(e, "Failed to copy cached steam.exe")
         }
 
-        // Steam DRM stub reads HKCU\Software\Valve\Steam\ActiveProcess\ActiveUser
-        // (DWORD = SteamID3 account ID). Without this it fails with
-        // "Application Load Error 3:0000065432". steam_helper does not write
-        // ActiveUser without a real IPC login, so we write it ourselves.
         try {
             val accountId = SteamService.userSteamId?.accountID?.toInt() ?: 0
             val userRegFile = File(container.rootDir, ".wine/user.reg")
+            val steamRoot = "C:\\Program Files (x86)\\Steam"
+            val activeProcessKey = "Software\\Valve\\Steam\\ActiveProcess"
             WineRegistryEditor(userRegFile).use { editor ->
                 editor.setCreateKeyIfNotExist(true)
-                editor.setDwordValue(
-                    "Software\\Valve\\Steam\\ActiveProcess",
-                    "ActiveUser",
-                    accountId,
-                )
+                editor.setDwordValue(activeProcessKey, "ActiveUser", accountId)
+                editor.setStringValue(activeProcessKey, "SteamClientDll", "$steamRoot\\steamclient.dll")
+                editor.setStringValue(activeProcessKey, "SteamClientDll64", "$steamRoot\\steamclient64.dll")
+                editor.setStringValue(activeProcessKey, "Universe", "Public")
             }
-            Timber.i("Set HKCU\\Software\\Valve\\Steam\\ActiveProcess\\ActiveUser=$accountId (bionic mode)")
+            Timber.i("Set HKCU\\Software\\Valve\\Steam\\ActiveProcess registry values (bionic mode, ActiveUser=$accountId)")
         } catch (e: Exception) {
-            Timber.e(e, "Failed to write ActiveUser registry value")
+            Timber.e(e, "Failed to write ActiveProcess registry values")
         }
         return
     }

@@ -514,6 +514,12 @@ public class BionicProgramLauncherComponent extends GuestProgramLauncherComponen
         envVars.put("SteamClientLaunch", "1");
         envVars.put("SteamEnv", "1");
         envVars.put("SteamPath", "C:\\Program Files (x86)\\Steam");
+        envVars.put("ValvePlatformMutex", "c:\\Program Files (x86)\\Steam/");
+
+        long steamId64 = app.gamenative.PrefManager.INSTANCE.getSteamUserSteamId64();
+        if (steamId64 != 0L) {
+            envVars.put("STEAMID", Long.toString(steamId64));
+        }
 
         // Override the SteamGameId=0 set above with the actual Steam appid for
         // this container, and publish the matching SteamAppId. Steamworks games
