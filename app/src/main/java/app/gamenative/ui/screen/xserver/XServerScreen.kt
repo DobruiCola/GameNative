@@ -529,9 +529,14 @@ fun XServerScreen(
             ?.setFrameRateLimit(limit)
     }
 
+    fun effectiveFpsLimit(): Int =
+        if (isLsfgAvailable && lsfgMultiplier >= 2) 0
+        else if (fpsLimiterEnabled) fpsLimiterTarget
+        else 0
+
     fun applyFpsLimiterEnabled(enabled: Boolean) {
         fpsLimiterEnabled = enabled
-        applyFpsLimiterToEngines(if (enabled) fpsLimiterTarget else 0)
+        applyFpsLimiterToEngines(effectiveFpsLimit())
         persistFpsLimiterState()
     }
 
@@ -539,7 +544,7 @@ fun XServerScreen(
         val sanitized = target.coerceAtLeast(5).coerceAtMost(detectedMaxRefreshRateHz)
         fpsLimiterTarget = sanitized
         if (fpsLimiterEnabled) {
-            applyFpsLimiterToEngines(sanitized)
+            applyFpsLimiterToEngines(effectiveFpsLimit())
         }
         persistFpsLimiterState()
     }
@@ -554,6 +559,7 @@ fun XServerScreen(
     fun applyLsfgMultiplier(mult: Int) {
         lsfgMultiplier = LsfgQuickMenuHelper.sanitizeMultiplier(mult)
         applyLsfgSettings()
+        applyFpsLimiterToEngines(effectiveFpsLimit())
     }
 
     fun applyLsfgFlowScale(scale: Float) {
@@ -573,8 +579,7 @@ fun XServerScreen(
         if (clampedTarget != fpsLimiterTarget) {
             fpsLimiterTarget = clampedTarget
         }
-        val appliedLimit = if (fpsLimiterEnabled) clampedTarget else 0
-        applyFpsLimiterToEngines(appliedLimit)
+        applyFpsLimiterToEngines(effectiveFpsLimit())
     }
 
     fun restorePerformanceHudPosition() {
@@ -648,7 +653,9 @@ fun XServerScreen(
         val hud = PerformanceHudView(
             context = context,
             fpsProvider = {
-                frameRating?.currentFPS ?: 0f
+                val raw = frameRating?.currentFPS ?: 0f
+                val mult = if (isLsfgAvailable && lsfgMultiplier >= 2) lsfgMultiplier else 1
+                raw * mult
             },
             initialConfig = performanceHudConfig,
             initialCompactMode = PrefManager.performanceHudCompactMode,
@@ -1577,11 +1584,12 @@ fun XServerScreen(
             }
             performanceHudHost = frameLayout
             val appId = appId
+            val usrGlibc: Boolean = container.getContainerVariant().equals(Container.GLIBC, ignoreCase = true)
             val existingXServer =
                 PluviaApp.xEnvironment
                     ?.getComponent<XServerComponent>(XServerComponent::class.java)
                     ?.xServer
-            val xServerToUse = existingXServer ?: XServer(ScreenInfo(xServerState.value.screenSize))
+            val xServerToUse = existingXServer ?: XServer(ScreenInfo(xServerState.value.screenSize), usrGlibc)
             val xServerView = XServerView(
                 context,
                 xServerToUse,
@@ -3071,6 +3079,8 @@ private fun setupXEnvironment(
         guestProgramLauncherComponent.setSteamType(container.getSteamType())
 
         envVars.putAll(container.envVars)
+        envVars.remove("DXVK_FRAME_RATE")
+        envVars.remove("VKD3D_FRAME_RATE")
         if (!envVars.has("WINEESYNC")) envVars.put("WINEESYNC", "1")
         val graphicsDriverConfig = KeyValueSet(container.getGraphicsDriverConfig())
         if (graphicsDriverConfig.get("version").lowercase(Locale.getDefault()).contains("gen8")) {
