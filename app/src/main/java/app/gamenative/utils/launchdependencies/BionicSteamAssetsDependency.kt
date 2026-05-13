@@ -31,6 +31,7 @@ import java.io.File
 object BionicSteamAssetsDependency : LaunchDependency {
     private const val STEAM_EXE = "steam.exe"
     private const val BIONIC_STEAM_ARCHIVE = "steam-androidarm64.tzst"
+    private const val EXPERIMENTAL_DRM_ARCHIVE = "experimental-drm-20260116.tzst"
     private const val LSTEAMCLIENT_DLL = "lsteamclient.dll"
     private const val LIBSTEAMCLIENT_SO = "libsteamclient.so"
     private const val CACERT_PEM = "cacert.pem"
@@ -78,6 +79,7 @@ object BionicSteamAssetsDependency : LaunchDependency {
         val filesDir = imageFs.filesDir
         if (!File(filesDir, STEAM_EXE).exists()) return false
         if (!File(filesDir, CACERT_PEM).exists()) return false
+        if (!File(filesDir, EXPERIMENTAL_DRM_ARCHIVE).exists()) return false
         if (!libsteamclientSo(imageFs).exists()) return false
         if (lsteamclientArchiveFor(container) != null) {
             if (!system32Dll(imageFs).exists() || !syswow64Dll(imageFs).exists()) return false
@@ -108,6 +110,19 @@ object BionicSteamAssetsDependency : LaunchDependency {
                     parentScope = this@coroutineScope,
                     context = context,
                     fileName = STEAM_EXE,
+                ).await()
+            }
+        }
+
+        val experimentalDrmCache = File(filesDir, EXPERIMENTAL_DRM_ARCHIVE)
+        if (!withContext(Dispatchers.IO) { experimentalDrmCache.exists() }) {
+            callbacks.setLoadingMessage("Downloading $EXPERIMENTAL_DRM_ARCHIVE")
+            withContext(Dispatchers.IO) {
+                SteamService.downloadFile(
+                    onDownloadProgress = { callbacks.setLoadingProgress(it) },
+                    parentScope = this@coroutineScope,
+                    context = context,
+                    fileName = EXPERIMENTAL_DRM_ARCHIVE,
                 ).await()
             }
         }
