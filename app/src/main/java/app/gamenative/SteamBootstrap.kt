@@ -180,8 +180,12 @@ object SteamBootstrap {
         val link = File(libDir, "libsqlite.so")
         try {
             val existingTarget = runCatching { Os.readlink(link.absolutePath) }.getOrNull()
+            if (existingTarget == null && link.exists()) {
+                Log.w(TAG, "Skipping sqlite compat symlink; ${link.absolutePath} exists and is not a symlink")
+                return
+            }
             if (existingTarget != "libsqlite3.so.0") {
-                link.delete()
+                if (existingTarget != null) link.delete()
                 Os.symlink("libsqlite3.so.0", link.absolutePath)
                 Log.i(TAG, "Created sqlite compat symlink ${link.absolutePath} -> libsqlite3.so.0")
             }
