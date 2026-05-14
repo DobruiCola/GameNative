@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <inttypes.h>
+#include <unistd.h>
 #include <dlfcn.h>
 #include "window_vert.h"
 #include "window_frag.h"
@@ -31,7 +33,10 @@ VulkanRendererContext::~VulkanRendererContext() {
     if (renderThread.joinable()) renderThread.join();
     std::lock_guard<std::mutex> lk(renderMutex);
     vk_.DeviceWaitIdle(device);
-    for (auto& [id, wt] : texMap) destroyWinTex(wt);
+    // texMap entries with isAHB=true are aliases into ahbImportCache; the
+    // backing resources are freed by cleanupAllAHBCache below. Only destroy
+    // the non-AHB CPU textures here to avoid a double-free.
+    for (auto& [id, wt] : texMap) { if (!wt.isAHB) destroyWinTex(wt); }
     texMap.clear();
     cleanupSwapchain(); cleanupCursorTex();
     cleanupAllAHBCache();
@@ -239,6 +244,8 @@ void VulkanRendererContext::createLogicalDevice() {
     loadDeviceDispatch();
     vk_.GetDeviceQueue(device,graphicsQueueFamilyIndex,0,&graphicsQueue);
 
+    vk_.GetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+
     VkPhysicalDeviceProperties props{};
     vk_.GetPhysicalDeviceProperties(physicalDevice, &props);
     maxAnisotropy = props.limits.maxSamplerAnisotropy;
@@ -444,9 +451,8 @@ void VulkanRendererContext::cleanupSwapchain() {
 }
 
 uint32_t VulkanRendererContext::findMemType(uint32_t filter, VkMemoryPropertyFlags props) {
-    VkPhysicalDeviceMemoryProperties mp; vk_.GetPhysicalDeviceMemoryProperties(physicalDevice,&mp);
-    for (uint32_t i=0;i<mp.memoryTypeCount;i++)
-        if ((filter&(1u<<i))&&(mp.memoryTypes[i].propertyFlags&props)==props) return i;
+    for (uint32_t i=0;i<memProperties.memoryTypeCount;i++)
+        if ((filter&(1u<<i))&&(memProperties.memoryTypes[i].propertyFlags&props)==props) return i;
     throw std::runtime_error("memtype");
 }
 void VulkanRendererContext::createBuffer(VkDeviceSize sz, VkBufferUsageFlags usage,
@@ -685,29 +691,30 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
     VkCommandBufferBeginInfo bi{}; bi.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     if (vk_.BeginCommandBuffer(cb,&bi)!=VK_SUCCESS) throw std::runtime_error("begin cb");
 
-    std::vector<VkImageMemoryBarrier> preLinear, preOptimal, postOptimal;
-    preLinear.reserve(draws.size());
-    preOptimal.reserve(draws.size());
-    postOptimal.reserve(draws.size() + (hasCursorUpload ? 1 : 0));
+    // Reuse class-member scratch vectors instead of reallocating each frame.
+    // ahbTransitions: one-time UNDEFINED->SHADER_READ_ONLY for newly-imported AHBs.
+    // preUpload/postUpload: UNDEFINED->TRANSFER_DST then TRANSFER_DST->SHADER_READ
+    // around a staging-buffer copy for CPU-uploaded textures.
+    auto& ahbTransitions = frameAhbTransitions;
+    auto& preUpload      = framePreUpload;
+    auto& postUpload     = framePostUpload;
+    ahbTransitions.clear();
+    preUpload.clear();
+    postUpload.clear();
+    ahbTransitions.reserve(draws.size());
+    preUpload.reserve(draws.size());
+    postUpload.reserve(draws.size() + (hasCursorUpload ? 1 : 0));
     for (auto& d:draws) {
         if (d.img==VK_NULL_HANDLE) continue;
-        if (d.useLinear && (d.needsTransition || d.dirtyLinear)) {
+        if (d.isAHB && d.needsTransition) {
             VkImageMemoryBarrier b{}; b.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            b.oldLayout=d.needsTransition?VK_IMAGE_LAYOUT_PREINITIALIZED:VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            b.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED;
             b.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             b.srcQueueFamilyIndex=b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
             b.image=d.img; b.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-            b.srcAccessMask=VK_ACCESS_HOST_WRITE_BIT; b.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
-            preLinear.push_back(b);
-        } else if (d.isAHB && d.dirtyAHB) {
-            VkImageMemoryBarrier b{}; b.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            b.oldLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            b.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            b.srcQueueFamilyIndex=b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
-            b.image=d.img; b.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
-            b.srcAccessMask=VK_ACCESS_HOST_WRITE_BIT; b.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
-            preLinear.push_back(b);
-        } else if (!d.useLinear && (d.needsTransition || d.upload!=VK_NULL_HANDLE) && d.img!=VK_NULL_HANDLE) {
+            b.srcAccessMask=0; b.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
+            ahbTransitions.push_back(b);
+        } else if (!d.isAHB && (d.needsTransition || d.upload!=VK_NULL_HANDLE)) {
             VkImageMemoryBarrier b{}; b.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
             b.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED;
             b.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -715,23 +722,23 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
             b.image=d.img; b.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
             b.srcAccessMask=0;
             b.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
-            preOptimal.push_back(b);
+            preUpload.push_back(b);
             b.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             b.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             b.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT; b.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
-            postOptimal.push_back(b);
+            postUpload.push_back(b);
         }
     }
-    if (!preLinear.empty())
-        vk_.CmdPipelineBarrier(cb,VK_PIPELINE_STAGE_HOST_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0,0,nullptr,0,nullptr,(uint32_t)preLinear.size(),preLinear.data());
-    if (!preOptimal.empty())
+    if (!ahbTransitions.empty())
+        vk_.CmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0,0,nullptr,0,nullptr,(uint32_t)ahbTransitions.size(),ahbTransitions.data());
+    if (!preUpload.empty())
         vk_.CmdPipelineBarrier(cb,
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0,0,nullptr,0,nullptr,(uint32_t)preOptimal.size(),preOptimal.data());
+            0,0,nullptr,0,nullptr,(uint32_t)preUpload.size(),preUpload.data());
     for (auto& d:draws) {
-        if (d.useLinear||d.upload==VK_NULL_HANDLE||d.img==VK_NULL_HANDLE) continue;
+        if (d.isAHB||d.upload==VK_NULL_HANDLE||d.img==VK_NULL_HANDLE) continue;
         VkBufferImageCopy r{}; r.bufferOffset=0; r.bufferRowLength=0; r.bufferImageHeight=0;
         r.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
         r.imageExtent={(uint32_t)d.w,(uint32_t)d.h,1};
@@ -753,11 +760,11 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         b.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         b.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         b.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT; b.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
-        postOptimal.push_back(b);
+        postUpload.push_back(b);
     }
-    if (!postOptimal.empty())
+    if (!postUpload.empty())
         vk_.CmdPipelineBarrier(cb,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0,0,nullptr,0,nullptr,(uint32_t)postOptimal.size(),postOptimal.data());
+            0,0,nullptr,0,nullptr,(uint32_t)postUpload.size(),postUpload.data());
 
     VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpi.renderPass=renderPass; rpi.framebuffer=swapchainFBs[imgIdx]; rpi.renderArea={{0,0},swapchainExt};
@@ -818,7 +825,7 @@ void VulkanRendererContext::renderLoop() {
 
     while (isRunning) {
         { std::unique_lock<std::mutex> lk(dirtyMutex);
-          dirtyCV.wait_for(lk,std::chrono::milliseconds(2),[this]{
+          dirtyCV.wait(lk,[this]{
               return !isRunning||(!surfaceDetached.load()&&(needsRender.load()||fbResized.load()))||cursorMoved.load(); }); }
         if (!isRunning) break;
 
@@ -915,7 +922,9 @@ ok=true;}catch(...){}
         std::lock_guard<std::mutex> lk(renderMutex);
         ox=sceneOffsetX; oy=sceneOffsetY; sx=sceneScaleX; sy=sceneScaleY;
         cw=(float)containerWidth; ch=(float)containerHeight;
-        ptrX=(short)pointerX.load(); ptrY=(short)pointerY.load();
+        uint32_t packedXY = pointerXY.load(std::memory_order_acquire);
+        ptrX = (short)(int16_t)(packedXY >> 16);
+        ptrY = (short)(int16_t)(packedXY & 0xFFFF);
         curHotX=cursorHotX; curHotY=cursorHotY; curW=cursorTexW; curH=cursorTexH;
         curVis=cursorVisible.load();
 
@@ -925,15 +934,12 @@ ok=true;}catch(...){}
             WinTex& wt=it->second;
             if (wt.ds==VK_NULL_HANDLE) continue;
             DrawEntry de{wt.img,wt.ds,VK_NULL_HANDLE,re.x,re.y,wt.w,wt.h};
-            de.useLinear=wt.useLinear;
             de.isAHB=wt.isAHB;
             if (wt.needsTransition) { de.needsTransition=true; wt.needsTransition=false; }
-            if (wt.dirty && !wt.isAHB) {
-                if (wt.useLinear) de.dirtyLinear=true;
-                else if (wt.stg!=VK_NULL_HANDLE) de.upload=wt.stg;
+            if (wt.dirty && !wt.isAHB && wt.stg!=VK_NULL_HANDLE) {
+                de.upload=wt.stg;
                 wt.dirty=false;
             } else if (wt.isAHB && wt.dirty) {
-                de.dirtyAHB = true;
                 wt.dirty=false;
             }
             draws.push_back(de);
@@ -1032,7 +1038,8 @@ void VulkanRendererContext::setTransform(float ox, float oy, float sx, float sy)
     needsRender.store(true); dirtyCV.notify_one();
 }
 void VulkanRendererContext::updatePointerPosition(short x, short y) {
-    pointerX.store(x); pointerY.store(y);
+    uint32_t packed = ((uint32_t)(uint16_t)x << 16) | (uint32_t)(uint16_t)y;
+    pointerXY.store(packed, std::memory_order_release);
     if (cursorVisible.load()) { cursorMoved.store(true); dirtyCV.notify_one(); }
 }
 void VulkanRendererContext::setCursorVisible(bool v) {
@@ -1052,12 +1059,17 @@ void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, s
     std::lock_guard<std::mutex> lk(renderMutex);
     WinTex& wt=texMap[id];
     if (wt.img==VK_NULL_HANDLE || wt.w!=w || wt.h!=h) {
-        if (wt.img!=VK_NULL_HANDLE) destroyWinTex(wt);
+        // If the slot was previously aliasing an AHB import its resources
+        // are owned by ahbImportCache; just clear the alias instead of freeing.
+        if (wt.img!=VK_NULL_HANDLE) {
+            if (wt.isAHB) wt = {};
+            else destroyWinTex(wt);
+        }
         if (!createWinTexResources(wt,w,h)) { texMap.erase(id); return; }
     }
     if (!wt.mapped) return;
 
-    size_t dstPitch = wt.useLinear ? (size_t)wt.imgLayout.rowPitch : (size_t)w * 4;
+    size_t dstPitch = (size_t)w * 4;
     wt.dirty = true;
 
     const int32_t srcStride = stride > 0 ? stride : w;
@@ -1080,57 +1092,50 @@ void VulkanRendererContext::updateWindowContent(int64_t id, void* px, short w, s
 void VulkanRendererContext::updateWindowContentAHB(int64_t id, AHardwareBuffer* ahb, short, short, int, int) {
     if (!ahb) return;
     std::lock_guard<std::mutex> lk(renderMutex);
-    WinTex& wt=texMap[id];
 
-    if (wt.ahb==ahb) { needsRender.store(true); dirtyCV.notify_one(); return; }
-
-    auto cit=ahbTexCache.find(ahb);
-    if (cit!=ahbTexCache.end()) {
-        wt.img=cit->second.img; wt.mem=cit->second.mem;
-        wt.view=cit->second.view; wt.ds=cit->second.ds;
-        wt.isAHB=true; wt.ahb=ahb;
-        AHardwareBuffer_Desc d{}; AHardwareBuffer_describe(ahb,&d);
-        wt.w=(int)d.width; wt.h=(int)d.height;
-        needsRender.store(true); dirtyCV.notify_one();
-        return;
-    }
-
-    if (wt.img!=VK_NULL_HANDLE && !wt.isAHB) {
-        destroyWinTex(wt);
+    auto cit = ahbImportCache.find(ahb);
+    if (cit == ahbImportCache.end()) {
+        WinTex tmp{};
+        if (!importAHBToWinTex(tmp, ahb)) {
+            RLOG_E("updateWindowContentAHB: import failed for id=%" PRId64, id);
+            return;
+        }
+        AHardwareBuffer_acquire(ahb);
+        ahbImportCache[ahb] = tmp;
+        windowAhbs[id].push_back(ahb);
+        cit = ahbImportCache.find(ahb);
     } else {
-        wt={};
-    }
-
-    WinTex tmp{};
-    if (!importAHBToWinTex(tmp,ahb)) { texMap.erase(id); return; }
-
-    AHBCached cached{tmp.img,tmp.mem,tmp.view,tmp.ds};
-    AHardwareBuffer_acquire(ahb);
-    ahbTexCache[ahb]=cached;
-    ahbCacheLRU.push_back(ahb);
-
-    size_t cacheMax = scanoutActive.load() ? AHB_CACHE_MAX_SCANOUT : AHB_CACHE_MAX_NORMAL;
-    while (ahbTexCache.size() > cacheMax) {
-        AHardwareBuffer* oldest = ahbCacheLRU.front();
-        ahbCacheLRU.pop_front();
-        auto eit = ahbTexCache.find(oldest);
-        if (eit != ahbTexCache.end()) {
-            WinTex deferred{};
-            deferred.img  = eit->second.img;
-            deferred.mem  = eit->second.mem;
-            deferred.view = eit->second.view;
-            deferred.ds   = eit->second.ds;
-            deferred.isAHB = false;
-            deleteQueue.push_back(deferred);
-            AHardwareBuffer_release(oldest);
-            ahbTexCache.erase(eit);
+        // Track ownership for this window if it's seeing this AHB for the first time.
+        auto& list = windowAhbs[id];
+        if (std::find(list.begin(), list.end(), ahb) == list.end()) {
+            list.push_back(ahb);
         }
     }
 
-    wt.img=cached.img; wt.mem=cached.mem; wt.view=cached.view; wt.ds=cached.ds;
-    wt.isAHB=true; wt.ahb=ahb;
-    AHardwareBuffer_Desc d{}; AHardwareBuffer_describe(ahb,&d);
-    wt.w=(int)d.width; wt.h=(int)d.height;
+    WinTex& src = cit->second;
+    WinTex& wt  = texMap[id];
+
+    // If the texMap slot was previously a non-AHB CPU texture, free it before
+    // overwriting (its resources are not owned by ahbImportCache).
+    if (wt.img != VK_NULL_HANDLE && !wt.isAHB) {
+        destroyWinTex(wt);
+        wt = {};
+    }
+
+    wt.img  = src.img;
+    wt.mem  = src.mem;
+    wt.view = src.view;
+    wt.ds   = src.ds;
+    wt.isAHB = true;
+    wt.ahb  = ahb;
+    wt.w    = src.w;
+    wt.h    = src.h;
+
+    // First use of the imported AHB needs an UNDEFINED -> SHADER_READ_ONLY transition.
+    if (src.needsTransition) {
+        wt.needsTransition  = true;
+        src.needsTransition = false;
+    }
     needsRender.store(true); dirtyCV.notify_one();
 }
 
@@ -1143,22 +1148,48 @@ void VulkanRendererContext::setRenderList(const int64_t* ids, const int* xs, con
 
 void VulkanRendererContext::removeWindow(int64_t id) {
     std::lock_guard<std::mutex> lk(renderMutex);
-    auto it=texMap.find(id);
-    if (it!=texMap.end()){destroyWinTex(it->second);texMap.erase(it);}
-    renderList.erase(std::remove_if(renderList.begin(),renderList.end(),[id](const RenderEntry& e){return e.id==id;}),renderList.end());
+
+    auto it = texMap.find(id);
+    if (it != texMap.end()) {
+        // If the slot holds an AHB import its resources belong to ahbImportCache
+        // and must not be destroyed here — just clear the alias.
+        if (!it->second.isAHB) destroyWinTex(it->second);
+        else it->second = {};
+        texMap.erase(it);
+    }
+
+    auto wit = windowAhbs.find(id);
+    if (wit != windowAhbs.end()) {
+        for (AHardwareBuffer* ahb : wit->second) {
+            auto cit = ahbImportCache.find(ahb);
+            if (cit != ahbImportCache.end()) {
+                WinTex deferred = cit->second;
+                // Tag as non-AHB so flushDeleteQueue treats it as a normal resource.
+                deferred.isAHB = false;
+                deferred.ahb   = nullptr;
+                deleteQueue.push_back(deferred);
+                AHardwareBuffer_release(ahb);
+                ahbImportCache.erase(cit);
+            }
+        }
+        windowAhbs.erase(wit);
+    }
+
+    renderList.erase(std::remove_if(renderList.begin(),renderList.end(),
+        [id](const RenderEntry& e){return e.id==id;}),renderList.end());
     needsRender.store(true); dirtyCV.notify_one();
 }
 
 void VulkanRendererContext::cleanupAllAHBCache() {
-    for (auto& [ahb,c]:ahbTexCache) {
-        if (c.ds!=VK_NULL_HANDLE) vk_.FreeDescriptorSets(device,winTexPool,1,&c.ds);
-        if (c.view!=VK_NULL_HANDLE) vk_.DestroyImageView(device,c.view,nullptr);
-        if (c.img!=VK_NULL_HANDLE) vk_.DestroyImage(device,c.img,nullptr);
-        if (c.mem!=VK_NULL_HANDLE) vk_.FreeMemory(device,c.mem,nullptr);
+    for (auto& [ahb, wt] : ahbImportCache) {
+        if (wt.ds   != VK_NULL_HANDLE) vk_.FreeDescriptorSets(device, winTexPool, 1, &wt.ds);
+        if (wt.view != VK_NULL_HANDLE) vk_.DestroyImageView(device, wt.view, nullptr);
+        if (wt.img  != VK_NULL_HANDLE) vk_.DestroyImage(device, wt.img, nullptr);
+        if (wt.mem  != VK_NULL_HANDLE) vk_.FreeMemory(device, wt.mem, nullptr);
         AHardwareBuffer_release(ahb);
     }
-    ahbTexCache.clear();
-    ahbCacheLRU.clear();
+    ahbImportCache.clear();
+    windowAhbs.clear();
 }
 
 #include <dlfcn.h>
@@ -1282,6 +1313,16 @@ void VulkanRendererContext::destroyScanout() {
     if (!scanoutActive.load()) return;
     scanoutActive.store(false);
 
+    // Drop any pending buffer + its fence FD that never made it to ST_APPLY.
+    { std::lock_guard<std::mutex> lk(scanoutMutex);
+      if (scanoutPending.ahb) {
+          AHardwareBuffer_release(scanoutPending.ahb);
+      }
+      if (scanoutPending.fenceFd >= 0) ::close(scanoutPending.fenceFd);
+      scanoutPending = {};
+      scanoutPendingDirty.store(false, std::memory_order_relaxed);
+    }
+
     if (scanoutGameSC || scanoutCursorSC) {
         void* t = ST_CREATE();
         if (scanoutGameSC)   ST_SETVIS(t, scanoutGameSC,   0);
@@ -1320,12 +1361,19 @@ void VulkanRendererContext::destroyScanout() {
     scanoutLocalW = scanoutLocalH = 0;
     scanoutNeedsGpuBlit = false;
     scanoutCursorBufW = scanoutCursorBufH = 0;
+
+    // Reset elision state so the next session re-issues geo and visibility.
+    scanoutLastSrc  = {};
+    scanoutLastDst  = {};
+    scanoutGeoDirty = true;
+    scanoutVisShown = false;
 }
 
-void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int x, int y, int w, int h) {
+void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int x, int y, int w, int h, int fenceFd) {
     if (!scanoutActive.load() || !scanoutGameSC || !ahb) {
         RLOG("scanoutSetBuffer: SKIPPED active=%d sc=%p ahb=%p",
             (int)scanoutActive.load(),scanoutGameSC,(void*)ahb);
+        if (fenceFd >= 0) ::close(fenceFd);
         return;
     }
     static int _scanoutBufCnt=0;
@@ -1340,10 +1388,13 @@ void VulkanRendererContext::scanoutSetBuffer(AHardwareBuffer* ahb, int x, int y,
     }
     AHardwareBuffer_acquire(ahb);
     { std::lock_guard<std::mutex> lk(scanoutMutex);
+      // Drop any previously-queued buffer that hasn't been applied yet, and
+      // close its fence FD to avoid a leak.
       if (scanoutPendingDirty.load() && scanoutPending.ahb && scanoutPending.ahb != ahb) {
           AHardwareBuffer_release(scanoutPending.ahb);
+          if (scanoutPending.fenceFd >= 0) ::close(scanoutPending.fenceFd);
       }
-      scanoutPending = {ahb, x, y, w, h};
+      scanoutPending = {ahb, x, y, w, h, fenceFd};
       scanoutPendingDirty.store(true, std::memory_order_release); }
     needsRender.store(true, std::memory_order_release);
     dirtyCV.notify_one();
@@ -1506,7 +1557,12 @@ void VulkanRendererContext::applyScanoutBuffer() {
       p = scanoutPending;
       scanoutPendingDirty.store(false, std::memory_order_relaxed); }
     AHardwareBuffer* ahb=p.ahb; int w=p.w, h=p.h; (void)p.x; (void)p.y;
-    if (!ahb || !scanoutGameSC) return;
+    int presentFenceFd = p.fenceFd;
+    if (!ahb || !scanoutGameSC) {
+        if (presentFenceFd >= 0) ::close(presentFenceFd);
+        if (ahb) AHardwareBuffer_release(ahb);
+        return;
+    }
 
     int32_t cw = containerWidth  > 0 ? containerWidth  : w;
     int32_t ch = containerHeight > 0 ? containerHeight : h;
@@ -1524,17 +1580,15 @@ void VulkanRendererContext::applyScanoutBuffer() {
         AHardwareBuffer_describe(ahb, &srcDesc);
         if (ensureScanoutLocalAhb((int)srcDesc.width, (int)srcDesc.height, srcDesc.format)) {
             VkImage srcImg = VK_NULL_HANDLE;
-            auto it = ahbTexCache.find(ahb);
-            if (it != ahbTexCache.end()) {
+            auto it = ahbImportCache.find(ahb);
+            if (it != ahbImportCache.end()) {
                 srcImg = it->second.img;
             } else {
                 WinTex tmp{};
                 if (importAHBToWinTex(tmp, ahb)) {
-                    AHBCached cached{tmp.img, tmp.mem, tmp.view, tmp.ds};
                     AHardwareBuffer_acquire(ahb);
-                    ahbTexCache[ahb] = cached;
-                    ahbCacheLRU.push_back(ahb);
-                    srcImg = cached.img;
+                    ahbImportCache[ahb] = tmp;
+                    srcImg = tmp.img;
                 }
             }
 
@@ -1576,12 +1630,29 @@ void VulkanRendererContext::applyScanoutBuffer() {
                 presentAhb = scanoutLocalAhb;
             }
         }
+        // GPU blit path: the source AHB is consumed via Vulkan, we don't need
+        // SurfaceFlinger to wait on the producer fence — close it ourselves.
+        if (presentFenceFd >= 0) { ::close(presentFenceFd); presentFenceFd = -1; }
     }
 
     void* t=ST_CREATE();
-    ST_SETBUF(t,scanoutGameSC,presentAhb,-1);
-    ST_SETGEO(t,scanoutGameSC,&src,&dst,0);
-    ST_SETVIS(t,scanoutGameSC,1);
+    // ASurfaceTransaction_setBuffer takes ownership of the fence FD on success.
+    ST_SETBUF(t,scanoutGameSC,presentAhb,presentFenceFd);
+
+    // Elide ST_SETGEO if geometry hasn't changed since the last apply.
+    auto arectEq = [](const ARect& a, const ARect& b) {
+        return a.left==b.left && a.top==b.top && a.right==b.right && a.bottom==b.bottom;
+    };
+    if (scanoutGeoDirty || !arectEq(src, scanoutLastSrc) || !arectEq(dst, scanoutLastDst)) {
+        ST_SETGEO(t, scanoutGameSC, &src, &dst, 0);
+        scanoutLastSrc = src;
+        scanoutLastDst = dst;
+        scanoutGeoDirty = false;
+    }
+    if (!scanoutVisShown) {
+        ST_SETVIS(t, scanoutGameSC, 1);
+        scanoutVisShown = true;
+    }
     ST_SETBP(t,scanoutGameSC,false);
     ST_APPLY(t);
     gameFrameDelivered.store(true);
@@ -1590,7 +1661,9 @@ void VulkanRendererContext::applyScanoutBuffer() {
 }
 
 void VulkanRendererContext::scanoutSetDst(int x, int y, int w, int h) {
+    if (scanoutDstX==x && scanoutDstY==y && scanoutDstW==w && scanoutDstH==h) return;
     scanoutDstX=x; scanoutDstY=y; scanoutDstW=w; scanoutDstH=h;
+    scanoutGeoDirty = true;
 }
 
 void VulkanRendererContext::scanoutSetCursorImage(void* pixels, short w, short h, short stride) {
@@ -1710,7 +1783,7 @@ void VulkanRendererContext::setFilterMode(int mode) {
     };
     int dsCount=0;
     for (auto& [id,wt]:texMap) { updateDS(wt.ds, wt.view); if(wt.ds!=VK_NULL_HANDLE) dsCount++; }
-    for (auto& [ahb,cached]:ahbTexCache) { updateDS(cached.ds, cached.view); if(cached.ds!=VK_NULL_HANDLE) dsCount++; }
+    for (auto& [ahb,wt]:ahbImportCache) { updateDS(wt.ds, wt.view); if(wt.ds!=VK_NULL_HANDLE) dsCount++; }
     if (cursorDS!=VK_NULL_HANDLE&&cursorView!=VK_NULL_HANDLE) { updateDS(cursorDS, cursorView); dsCount++; }
     needsRender.store(true); dirtyCV.notify_one();
 }

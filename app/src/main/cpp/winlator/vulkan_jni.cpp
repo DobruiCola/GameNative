@@ -161,10 +161,14 @@ Java_com_winlator_renderer_VulkanRenderer_nativeDestroyScanout(JNIEnv*, jobject,
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_renderer_VulkanRenderer_nativeScanoutSetBuffer(
-    JNIEnv*, jobject, jlong handle, jlong ahbPtr, jint x, jint y, jint w, jint h)
+    JNIEnv*, jobject, jlong handle, jlong ahbPtr, jint x, jint y, jint w, jint h, jint fenceFd)
 {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
-    if (r && ahbPtr) r->scanoutSetBuffer(reinterpret_cast<AHardwareBuffer*>(ahbPtr), x, y, w, h);
+    if (r && ahbPtr) {
+        r->scanoutSetBuffer(reinterpret_cast<AHardwareBuffer*>(ahbPtr), x, y, w, h, (int)fenceFd);
+    } else if (fenceFd >= 0) {
+        ::close((int)fenceFd);
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL

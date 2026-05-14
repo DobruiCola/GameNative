@@ -1,6 +1,5 @@
 #pragma once
 #include <vulkan/vulkan.h>
-#include <list>
 
 // VK_API_VERSION_1_3 was added in Vulkan SDK 1.2.175.
 // NDK 22 ships with older headers, so we provide a compat shim.
@@ -149,7 +148,7 @@ public:
     void applyScanoutBuffer();
     void initScanoutFromWindows(ANativeWindow* gameWin, ANativeWindow* cursorWin);
     void scanoutSetDst(int x, int y, int w, int h);
-    void scanoutSetBuffer(AHardwareBuffer* ahb, int x, int y, int w, int h);
+    void scanoutSetBuffer(AHardwareBuffer* ahb, int x, int y, int w, int h, int fenceFd = -1);
     void scanoutSetCursorImage(void* pixels, short w, short h, short stride);
     void scanoutSetCursorPos(short x, short y, short hotX, short hotY);
     std::atomic<bool> scanoutActive{false};
@@ -190,23 +189,12 @@ private:
         VkDeviceMemory       stgMem         = VK_NULL_HANDLE;
         void*                mapped         = nullptr;
         VkDeviceSize         cap            = 0;
-        VkSubresourceLayout  imgLayout      = {};
         int                  w              = 0;
         int                  h              = 0;
         bool                 dirty          = false;
         bool                 isAHB          = false;
         bool                 needsTransition = false;
-        bool                 useLinear      = false;
-        bool                 stgCached      = false;
         AHardwareBuffer*     ahb            = nullptr;
-    };
-    struct AHBCached {
-        VkImage         img  = VK_NULL_HANDLE;
-        VkDeviceMemory  mem  = VK_NULL_HANDLE;
-        VkImageView     view = VK_NULL_HANDLE;
-        VkDescriptorSet ds   = VK_NULL_HANDLE;
-        int             w    = 0;
-        int             h    = 0;
     };
     struct RenderEntry { int64_t id; int x, y; };
     struct DrawEntry {
@@ -216,9 +204,6 @@ private:
         int             x=0, y=0, w=0, h=0;
         bool            needsTransition = false;
         bool            isAHB          = false;
-        bool            dirtyAHB       = false;
-        bool            useLinear      = false;
-        bool            dirtyLinear    = false;
     };
 
     ANativeWindow* window;
@@ -233,17 +218,28 @@ private:
     float activeGamma = 1.0f;
     float maxAnisotropy           = 1.0f;
     bool  cubicSupported          = false;
+    VkPhysicalDeviceMemoryProperties memProperties{};
     VkPresentModeKHR requestedPresentMode = VK_PRESENT_MODE_FIFO_KHR;
     uint32_t graphicsQueueFamilyIndex = 0;
     std::vector<VkPresentModeKHR> availablePresentModes;
 
     std::unordered_map<int64_t, WinTex>         texMap;
-    std::unordered_map<AHardwareBuffer*, AHBCached> ahbTexCache;
-    std::list<AHardwareBuffer*>                  ahbCacheLRU;
-    static constexpr size_t AHB_CACHE_MAX_NORMAL  =  6;
-    static constexpr size_t AHB_CACHE_MAX_SCANOUT =  2;
+
+    // AHB import cache: re-use a single WinTex per AHardwareBuffer so multiple
+    // updates that target the same backing buffer share one VkImage + descriptor.
+    // Ownership is tracked per-window via windowAhbs so removeWindow can drop
+    // any AHBs it acquired without scanning the whole cache.
+    std::unordered_map<AHardwareBuffer*, WinTex>              ahbImportCache;
+    std::unordered_map<int64_t, std::vector<AHardwareBuffer*>> windowAhbs;
+
     std::vector<WinTex>    deleteQueue;
     std::vector<RenderEntry> renderList;
+
+    // Scratch barrier vectors used by recordCmdBuf. Held as members so they
+    // are not re-allocated on the heap every frame.
+    std::vector<VkImageMemoryBarrier> frameAhbTransitions;
+    std::vector<VkImageMemoryBarrier> framePreUpload;
+    std::vector<VkImageMemoryBarrier> framePostUpload;
 
     void*  scanoutGameSC      = nullptr;
     void*  scanoutCursorSC    = nullptr;
@@ -276,12 +272,20 @@ private:
     int32_t lastDstX=0, lastDstY=0, lastDstW=0, lastDstH=0;
     bool    gameScVisible      = false;
 
-    struct ScanoutPending { AHardwareBuffer* ahb=nullptr; int x=0,y=0,w=0,h=0; };
+    // Skip redundant ST_SETGEO / ST_SETVIS calls when nothing has changed.
+    ARect   scanoutLastSrc{};
+    ARect   scanoutLastDst{};
+    bool    scanoutGeoDirty    = true;
+    bool    scanoutVisShown    = false;
+
+    struct ScanoutPending { AHardwareBuffer* ahb=nullptr; int x=0,y=0,w=0,h=0; int fenceFd=-1; };
     std::mutex        scanoutMutex;
     ScanoutPending    scanoutPending{};
     std::atomic<bool> scanoutPendingDirty{false};
 
-    std::atomic<int>  pointerX{0}, pointerY{0};
+    // Packed (x << 16) | (y & 0xFFFF) so both coordinates are loaded together
+    // and the render thread cannot pick up a mismatched (newX, oldY) pair.
+    std::atomic<uint32_t> pointerXY{0};
     float sceneOffsetX=0.f, sceneOffsetY=0.f, sceneScaleX=1.f, sceneScaleY=1.f;
 
     std::atomic<bool> cursorVisible{false};

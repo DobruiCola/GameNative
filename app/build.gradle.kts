@@ -166,6 +166,16 @@ android {
             // 'extractNativeLibs' was not enough to keep the jniLibs and
             // the libs went missing after adding on-demand feature delivery
             useLegacyPackaging = true
+
+            // adrenotools' hook libs are present both as prebuilts in jniLibs/
+            // and as outputs of the vulkan_renderer CMake subproject. Keep the
+            // first one merge encounters (the prebuilt) so packaging doesn't fail.
+            pickFirsts += setOf(
+                "**/libhook_impl.so",
+                "**/libmain_hook.so",
+                "**/libfile_redirect_hook.so",
+                "**/libgsl_alloc_hook.so",
+            )
         }
     }
     testOptions {
