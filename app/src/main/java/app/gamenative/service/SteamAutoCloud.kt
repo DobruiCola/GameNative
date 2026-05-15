@@ -268,6 +268,95 @@ object SteamAutoCloud {
         return changesExist to FileChanges(deletedFiles, modifiedFiles, newFiles)
     }
 
+    private fun getLocalUserFilesAsPrefixMap(
+        appInfo: SteamApp,
+        prefixToPath: (String) -> String,
+    ): Map<String, List<UserFileInfo>> {
+        val savePatterns = appInfo.ufs.saveFilePatterns.filter { userFile -> userFile.root.isWindows }
+
+        val result = mutableMapOf<String, MutableList<UserFileInfo>>()
+
+        if (savePatterns.isNotEmpty()) {
+            savePatterns.forEach { userFile ->
+                if (userFile.root == PathType.SteamUserData) {
+                    // skip handling, use the logic below to scan SteamUserData
+                    return@forEach
+                }
+
+                val basePath = Paths.get(prefixToPath(userFile.root.toString()), userFile.substitutedPath)
+
+                Timber.i("Looking for saves in $basePath with pattern ${userFile.pattern} (prefix ${userFile.prefix})")
+
+                val files = FileUtils.findFilesRecursive(
+                    rootPath = basePath,
+                    pattern = userFile.pattern,
+                    maxDepth = 5,
+                ).map {
+                    val sha = streamingShaHash(it)
+
+                    Timber.i("Found ${it.pathString}\n\tin ${userFile.prefix}\n\twith sha [${sha.joinToString(", ")}]")
+
+                    val relativePath = basePath.relativize(it).pathString
+
+                    UserFileInfo(
+                        root = userFile.root,
+                        path = userFile.substitutedPath,
+                        filename = relativePath,
+                        timestamp = Files.getLastModifiedTime(it).toMillis(),
+                        sha = sha,
+                        cloudRoot = userFile.uploadRoot,
+                        cloudPath = userFile.uploadPath
+                    )
+                }.collect(Collectors.toList())
+
+                Timber.i("Found ${files.size} file(s) in $basePath for pattern ${userFile.pattern}")
+
+                val prefixKey = Paths.get(userFile.prefix).pathString
+                result.getOrPut(prefixKey) { mutableListOf() }.addAll(files)
+            }
+        }
+
+        // Scan SteamUserData root recursively (depth 5)
+        val rootType = PathType.SteamUserData
+        val basePath = Paths.get(prefixToPath(rootType.toString()))
+
+        Timber.i("Scanning $basePath recursively (depth 5) under ${rootType.name}")
+
+        val files = FileUtils.findFilesRecursive(
+            rootPath = basePath,
+            pattern = "*",
+            maxDepth = 5,
+        ).map {
+            val sha = streamingShaHash(it)
+
+            val relativePath = basePath.relativize(it).pathString
+
+            Timber.i("Found ${it.pathString}\n\tin %${rootType.name}%\n\twith sha [${sha.joinToString(", ")}]")
+
+            // Store relative path in filename; empty path component
+            UserFileInfo(
+                root = rootType,
+                path = "",
+                filename = relativePath,
+                timestamp = Files.getLastModifiedTime(it).toMillis(),
+                sha = sha,
+                cloudRoot = rootType,
+                cloudPath = ""
+            )
+        }.collect(Collectors.toList())
+
+        Timber.i("Found ${files.size} file(s) in $basePath")
+
+        mapOf(Paths.get("%${rootType.name}%").pathString to files)
+
+        if (files.isNotEmpty()) {
+            val prefixKey = "%${rootType.name}%"
+            result.getOrPut(prefixKey) { mutableListOf() }.addAll(files)
+        }
+
+        return result
+    }
+
     fun syncUserFiles(
         appInfo: SteamApp,
         clientId: Long,
@@ -304,92 +393,6 @@ object SteamAutoCloud {
                     } == true
                 }
             }
-
-        val getLocalUserFilesAsPrefixMap: () -> Map<String, List<UserFileInfo>> = {
-            val savePatterns = appInfo.ufs.saveFilePatterns.filter { userFile -> userFile.root.isWindows }
-
-            val result = mutableMapOf<String, MutableList<UserFileInfo>>()
-
-            if (savePatterns.isNotEmpty()) {
-                savePatterns.forEach { userFile ->
-                    if (userFile.root == PathType.SteamUserData) {
-                        // skip handling, use the logic below to scan SteamUserData
-                        return@forEach
-                    }
-
-                    val basePath = Paths.get(prefixToPath(userFile.root.toString()), userFile.substitutedPath)
-
-                    Timber.i("Looking for saves in $basePath with pattern ${userFile.pattern} (prefix ${userFile.prefix})")
-
-                    val files = FileUtils.findFilesRecursive(
-                        rootPath = basePath,
-                        pattern = userFile.pattern,
-                        maxDepth = 5,
-                    ).map {
-                        val sha = streamingShaHash(it)
-
-                        Timber.i("Found ${it.pathString}\n\tin ${userFile.prefix}\n\twith sha [${sha.joinToString(", ")}]")
-
-                        val relativePath = basePath.relativize(it).pathString
-
-                        UserFileInfo(
-                            root = userFile.root,
-                            path = userFile.substitutedPath,
-                            filename = relativePath,
-                            timestamp = Files.getLastModifiedTime(it).toMillis(),
-                            sha = sha,
-                            cloudRoot = userFile.uploadRoot,
-                            cloudPath = userFile.uploadPath
-                        )
-                    }.collect(Collectors.toList())
-
-                    Timber.i("Found ${files.size} file(s) in $basePath for pattern ${userFile.pattern}")
-
-                    val prefixKey = Paths.get(userFile.prefix).pathString
-                    result.getOrPut(prefixKey) { mutableListOf() }.addAll(files)
-                }
-            }
-
-            // Scan SteamUserData root recursively (depth 5)
-            val rootType = PathType.SteamUserData
-            val basePath = Paths.get(prefixToPath(rootType.toString()))
-
-            Timber.i("Scanning $basePath recursively (depth 5) under ${rootType.name}")
-
-            val files = FileUtils.findFilesRecursive(
-                rootPath = basePath,
-                pattern = "*",
-                maxDepth = 5,
-            ).map {
-                val sha = streamingShaHash(it)
-
-                val relativePath = basePath.relativize(it).pathString
-
-                Timber.i("Found ${it.pathString}\n\tin %${rootType.name}%\n\twith sha [${sha.joinToString(", ")}]")
-
-                // Store relative path in filename; empty path component
-                UserFileInfo(
-                    root = rootType,
-                    path = "",
-                    filename = relativePath,
-                    timestamp = Files.getLastModifiedTime(it).toMillis(),
-                    sha = sha,
-                    cloudRoot = rootType,
-                    cloudPath = ""
-                )
-            }.collect(Collectors.toList())
-
-            Timber.i("Found ${files.size} file(s) in $basePath")
-
-            mapOf(Paths.get("%${rootType.name}%").pathString to files)
-
-            if (files.isNotEmpty()) {
-                val prefixKey = "%${rootType.name}%"
-                result.getOrPut(prefixKey) { mutableListOf() }.addAll(files)
-            }
-
-            result
-        }
 
         val buildUrl: (Boolean, String, String) -> String = { useHttps, urlHost, urlPath ->
             val scheme = if (useHttps) "https://" else "http://"
@@ -723,7 +726,7 @@ object SteamAutoCloud {
             val allLocalUserFiles: List<UserFileInfo>
 
             microsecInitCaches = measureTime {
-                localUserFilesMap = getLocalUserFilesAsPrefixMap()
+                localUserFilesMap = getLocalUserFilesAsPrefixMap(appInfo, prefixToPath)
                 allLocalUserFiles = localUserFilesMap.map { it.value }.flatten()
             }.inWholeMicroseconds
 
@@ -760,7 +763,7 @@ object SteamAutoCloud {
                     val updatedLocalFiles: Map<String, List<UserFileInfo>>
                     val hasLocalChanges: Boolean
                     microsecValidateState = measureTime {
-                        updatedLocalFiles = getLocalUserFilesAsPrefixMap()
+                        updatedLocalFiles = getLocalUserFilesAsPrefixMap(appInfo, prefixToPath)
                         hasLocalChanges = hasHashConflicts(updatedLocalFiles, appFileListChange)
                         filesManaged = updatedLocalFiles.size
                     }.inWholeMicroseconds
