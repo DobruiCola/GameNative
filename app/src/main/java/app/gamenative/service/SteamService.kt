@@ -20,7 +20,6 @@ import app.gamenative.data.AppInfo
 import app.gamenative.data.CachedLicense
 import app.gamenative.data.DepotInfo
 import app.gamenative.data.DownloadInfo
-import app.gamenative.data.Emoticon
 import app.gamenative.data.EncryptedAppTicket
 import app.gamenative.data.GameProcessInfo
 import app.gamenative.data.GameSource
@@ -39,6 +38,7 @@ import app.gamenative.db.dao.ChangeNumbersDao
 import app.gamenative.db.dao.EncryptedAppTicketDao
 import app.gamenative.db.dao.FileChangeListsDao
 import app.gamenative.db.dao.SteamAppDao
+import app.gamenative.db.dao.SteamFileHashCacheDao
 import app.gamenative.db.dao.SteamLicenseDao
 import app.gamenative.enums.LoginResult
 import app.gamenative.enums.Marker
@@ -216,6 +216,9 @@ class SteamService : Service(), IChallengeUrlChanged {
     lateinit var fileChangeListsDao: FileChangeListsDao
 
     @Inject
+    lateinit var steamFileHashCacheDao: SteamFileHashCacheDao
+
+    @Inject
     lateinit var cachedLicenseDao: CachedLicenseDao
 
     @Inject
@@ -265,6 +268,10 @@ class SteamService : Service(), IChallengeUrlChanged {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var reconnectJob: Job? = null
+    private var offlineAchievementSyncJob: Job? = null
+    private val pendingSyncAppIds: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val pendingSyncFileLock = Any()
+    private val pendingSyncFile by lazy { File(applicationContext.filesDir, "pending_achievement_sync.txt") }
 
     private val onEndProcess: (AndroidEvent.EndProcess) -> Unit = {
         Companion.stop()
@@ -607,6 +614,29 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         fun getDownloadableDlcAppsOf(appId: Int): List<SteamApp>? {
             return runBlocking(Dispatchers.IO) { instance?.appDao?.findDownloadableDLCApps(appId) }
+        }
+
+        /**
+         * Java-friendly accessor for the AppIDs of every DLC the current
+         * user owns for [appId]. Combines the visible (depot-bearing) and
+         * hidden DLC sets returned by [SteamAppDao]; both are licence-gated
+         * so the result is "DLCs this account can legally use", regardless
+         * of whether they're installed on disk.
+         *
+         * Returns an empty array (never null) if no DLCs are owned or the
+         * service isn't ready -- safe to call from any launch path without
+         * a null-check on the Java side.
+         */
+        @JvmStatic
+        fun getOwnedDlcAppIdsOf(appId: Int): IntArray {
+            val visible = getDownloadableDlcAppsOf(appId).orEmpty()
+            val hidden  = getHiddenDlcAppsOf(appId).orEmpty()
+            if (visible.isEmpty() && hidden.isEmpty()) return IntArray(0)
+            val ids = LinkedHashSet<Int>(visible.size + hidden.size)
+            visible.forEach { ids.add(it.id) }
+            hidden.forEach { ids.add(it.id) }
+            ids.remove(appId)
+            return ids.toIntArray()
         }
 
         fun getHiddenDlcAppsOf(appId: Int): List<SteamApp>? {
@@ -1254,10 +1284,11 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         /**
          * Resolves the effective launch executable for a Steam game (container config or auto-detected).
-         * Returns a non-empty sentinel when [Container.isLaunchRealSteam] is true so the launch is not blocked.
+         * Returns a non-empty sentinel when [Container.isLaunchRealSteam] or
+         * [Container.isLaunchBionicSteam] is true so the launch is not blocked.
          */
         fun getLaunchExecutable(appId: String, container: Container): String {
-            if (container.isLaunchRealSteam) return "steam"
+            if (container.isLaunchRealSteam || container.isLaunchBionicSteam) return "steam"
             val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
             return container.executablePath.ifEmpty { getInstalledExe(gameId) }
         }
@@ -1296,6 +1327,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                         appInfoDao.deleteApp(appId)
                         changeNumbersDao.deleteByAppId(appId)
                         fileChangeListsDao.deleteByAppId(appId)
+                        steamFileHashCacheDao.deleteByAppId(appId)
                         downloadingAppInfoDao.deleteApp(appId)
                         appDao.clearWorkshopState(appId)
 
@@ -1304,6 +1336,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                             appInfoDao.deleteApp(dlcAppId)
                             changeNumbersDao.deleteByAppId(dlcAppId)
                             fileChangeListsDao.deleteByAppId(dlcAppId)
+                            steamFileHashCacheDao.deleteByAppId(dlcAppId)
                         }
                     }
                 }
@@ -2463,6 +2496,7 @@ class SteamService : Service(), IChallengeUrlChanged {
         suspend fun closeApp(context: Context, appId: Int, isOffline: Boolean, prefixToPath: (String) -> String) = withContext(Dispatchers.IO) {
             async {
                 if (isOffline || !isConnected) {
+                    instance?.addPendingSyncApp(appId)
                     return@async
                 }
 
@@ -2516,6 +2550,7 @@ class SteamService : Service(), IChallengeUrlChanged {
                     }
                 } finally {
                     releaseSync(appId)
+                    instance?.removePendingSyncApp(appId)
                 }
             }
         }
@@ -2805,7 +2840,7 @@ class SteamService : Service(), IChallengeUrlChanged {
 
         private fun clearUserData(clearCloudSyncState: Boolean = false) {
             PrefManager.clearSteamSessionPreferences()
-
+            instance?.clearPendingSync()
             clearDatabase(clearCloudSyncState = clearCloudSyncState)
         }
 
@@ -2821,7 +2856,10 @@ class SteamService : Service(), IChallengeUrlChanged {
             EResult.ExpiredLoginAuthCode,
             EResult.RequirePasswordReEntry,
             EResult.ParentalControlRestricted,
-            EResult.CachedCredentialInvalid -> true
+            EResult.CachedCredentialInvalid,
+            EResult.AccessDenied,
+            EResult.Expired,
+            EResult.Revoked -> true
             else -> false
         }
 
@@ -2854,6 +2892,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             val username = PrefManager.username
 
             clearUserData(clearCloudSyncState = clearCloudSyncState)
+            instance?._localPersona?.value = SteamFriend()
 
             val event = SteamEvent.LoggedOut(username)
             PluviaApp.events.emit(event)
@@ -3234,6 +3273,13 @@ class SteamService : Service(), IChallengeUrlChanged {
         super.onCreate()
         instance = this
 
+        // Restore any app IDs that were pending achievement sync before the service was killed
+        pendingSyncAppIds.addAll(
+            runCatching {
+                pendingSyncFile.readLines().mapNotNull { it.trim().toIntOrNull() }
+            }.getOrDefault(emptyList())
+        )
+
         // JavaSteam logger CME hot-fix
         runCatching {
             val clazz = Class.forName("in.dragonbra.javasteam.util.log.LogManager")
@@ -3487,6 +3533,9 @@ class SteamService : Service(), IChallengeUrlChanged {
         _unifiedFriends = null
 
         reconnectJob?.cancel()
+        offlineAchievementSyncJob?.cancel()
+        offlineAchievementSyncJob = null
+        pendingSyncAppIds.clear()
         isStopping = false
         retryAttempt = 0
 
@@ -3538,6 +3587,8 @@ class SteamService : Service(), IChallengeUrlChanged {
         Timber.i("Disconnected from Steam. User initiated: ${callback.isUserInitiated}")
 
         isConnected = false
+        offlineAchievementSyncJob?.cancel()
+        offlineAchievementSyncJob = null
 
         if (!isStopping && retryAttempt < MAX_RETRY_ATTEMPTS) {
             retryAttempt++
@@ -3628,6 +3679,16 @@ class SteamService : Service(), IChallengeUrlChanged {
                 // Tell steam we're online, this allows friends to update.
                 _steamFriends?.setPersonaState(PrefManager.personaState)
 
+                val activeGame = ActiveGameRegistry.get()
+                if (activeGame != null) {
+                    Timber.i("Re-sending active game session for appId=%d after Steam reconnect", activeGame.appId)
+                    scope.launch {
+                        notifyRunningProcesses(activeGame)
+                    }
+                } else {
+                    Timber.d("No active game session to re-send after Steam reconnect")
+                }
+
                 notificationHelper.notify("Connected")
 
                 _loginResult = LoginResult.Success
@@ -3636,6 +3697,8 @@ class SteamService : Service(), IChallengeUrlChanged {
                 scope.launch {
                     resumePendingWorkshopDownloads()
                 }
+
+                syncPendingOfflineAchievements()
             }
 
             else -> {
@@ -3688,6 +3751,101 @@ class SteamService : Service(), IChallengeUrlChanged {
         }
     }
 
+    internal fun addPendingSyncApp(appId: Int) {
+        synchronized(pendingSyncFileLock) {
+            pendingSyncAppIds.add(appId)
+            runCatching { pendingSyncFile.writeText(pendingSyncAppIds.joinToString("\n")) }
+        }
+        Timber.tag("achievements").d("Recording appId=$appId for offline achievement sync on reconnect")
+    }
+
+    internal fun removePendingSyncApp(appId: Int) {
+        synchronized(pendingSyncFileLock) {
+            pendingSyncAppIds.remove(appId)
+            runCatching {
+                if (pendingSyncAppIds.isEmpty()) pendingSyncFile.delete()
+                else pendingSyncFile.writeText(pendingSyncAppIds.joinToString("\n"))
+            }
+        }
+    }
+
+    internal fun clearPendingSync() {
+        synchronized(pendingSyncFileLock) {
+            pendingSyncAppIds.clear()
+            runCatching { pendingSyncFile.delete() }
+        }
+    }
+
+    private fun syncPendingOfflineAchievements() {
+        offlineAchievementSyncJob?.cancel()
+        offlineAchievementSyncJob = scope.launch {
+            try {
+                delay(2_000)
+
+                if (!isConnected || !isLoggedIn) {
+                    Timber.tag("achievements").d("Skipping reconnect achievement sync sweep — Steam no longer connected")
+                    return@launch
+                }
+
+                val appsToSync = pendingSyncAppIds.toSet()
+                if (appsToSync.isEmpty()) {
+                    Timber.tag("achievements").d("Skipping reconnect achievement sync sweep — no apps were closed while offline")
+                    return@launch
+                }
+
+                Timber.tag("achievements").i("Syncing offline achievements for ${appsToSync.size} app(s) closed while disconnected")
+                for (appId in appsToSync) {
+                    ensureActive()
+
+                    if (!isConnected || !isLoggedIn) {
+                        Timber.tag("achievements").d("Stopping reconnect achievement sync sweep — Steam no longer connected")
+                        return@launch
+                    }
+
+                    val gseSaveDirs = getGseSaveDirs(applicationContext, appId).filter { it.isDirectory }
+                    if (gseSaveDirs.isEmpty()) {
+                        removePendingSyncApp(appId)
+                        continue
+                    }
+
+                    val hasOfflineAchievementData = gseSaveDirs.any { dir ->
+                        File(dir, "achievements.json").exists() ||
+                            (File(dir, "stats").isDirectory && (File(dir, "stats").listFiles()?.isNotEmpty() == true))
+                    }
+                    if (!hasOfflineAchievementData) {
+                        removePendingSyncApp(appId)
+                        continue
+                    }
+
+                    if (!tryAcquireSync(appId)) {
+                        Timber.tag("achievements").d("Skipping reconnect achievement sync for appId=$appId — sync already in progress")
+                        continue
+                    }
+
+                    try {
+                        Timber.tag("achievements").i("Attempting reconnect achievement sync for appId=$appId")
+                        syncAchievementsFromGoldberg(applicationContext, appId)
+                        removePendingSyncApp(appId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Timber.tag("achievements").e(e, "Reconnect achievement sync failed for appId=$appId")
+                    } finally {
+                        releaseSync(appId)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.tag("achievements").e(e, "Reconnect achievement sync sweep failed")
+            } finally {
+                if (offlineAchievementSyncJob?.isActive != true) {
+                    offlineAchievementSyncJob = null
+                }
+            }
+        }
+    }
+
     private fun onLoggedOff(callback: LoggedOffCallback) {
         Timber.i("Logged off of Steam: ${callback.result}")
 
@@ -3703,17 +3861,16 @@ class SteamService : Service(), IChallengeUrlChanged {
             scope.launch { stop() }
         } else if (callback.result == EResult.LoggedInElsewhere) {
             // received when a client runs an app and wants to forcibly close another
-            // client running an app
+            // client running an app. The callback doesn't carry the remote app id, so the
+            // dialog falls back to a generic "another game" label.
             if (PluviaApp.xEnvironment != null) {
                 if (!_isHandlingConflict.getAndSet(true)) {
                     _isPlayingBlocked.value = true
-                    val event = SteamEvent.PlayingBlocked
-                    PluviaApp.events.emit(event)
+                    PluviaApp.events.emit(SteamEvent.PlayingBlocked(remoteAppName = null))
                 }
                 reconnect()
             } else {
-                val event = SteamEvent.ForceCloseApp
-                PluviaApp.events.emit(event)
+                PluviaApp.events.emit(SteamEvent.ForceCloseApp)
                 reconnect()
             }
         } else {
@@ -3722,11 +3879,20 @@ class SteamService : Service(), IChallengeUrlChanged {
     }
 
     private fun onPlayingSessionState(callback: PlayingSessionStateCallback) {
-        Timber.d("onPlayingSessionState called with isPlayingBlocked = " + callback.isPlayingBlocked)
+        Timber.d("onPlayingSessionState: blocked=${callback.isPlayingBlocked} remoteAppId=${callback.playingAppID}")
         _isPlayingBlocked.value = callback.isPlayingBlocked
-        if (callback.isPlayingBlocked && _isHandlingConflict.compareAndSet(false, true)) {
-            val event = SteamEvent.PlayingBlocked
-            PluviaApp.events.emit(event)
+
+        if (!callback.isPlayingBlocked) return
+
+        // Only show the dialog if the remote app is in our local DB. Non-Steam shortcuts get
+        // synthetic IDs we can't kick and have no name for, so let the local launch proceed.
+        val knownApp = callback.playingAppID
+            .takeIf { it != 0 }
+            ?.let { getAppInfoOf(it) }
+            ?: return
+
+        if (_isHandlingConflict.compareAndSet(false, true)) {
+            PluviaApp.events.emit(SteamEvent.PlayingBlocked(remoteAppName = knownApp.name))
         }
     }
 
@@ -3748,8 +3914,6 @@ class SteamService : Service(), IChallengeUrlChanged {
             db.withTransaction {
                 // Send off an event if we change states.
                 if (callback.friendId == steamClient!!.steamID) {
-                    Timber.d("Local persona state received: ${callback.playerName}")
-
                     val avatarHash = callback.avatarHash.toHexString()
                     val playerName = callback.playerName
 
@@ -3760,6 +3924,10 @@ class SteamService : Service(), IChallengeUrlChanged {
                     } else {
                         callback.personaState
                     }
+
+                    Timber.d(
+                        "Local persona state received: ${callback.playerName}, state=$state, gameAppId=${callback.gamePlayedAppId}, gameName=${callback.gameName}",
+                    )
 
                     // Update local state flow
                     _localPersona.update {

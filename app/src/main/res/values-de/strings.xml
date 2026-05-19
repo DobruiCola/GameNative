@@ -98,6 +98,10 @@
     <string name="downloads_status_failed">Fehlgeschlagen</string>
     <string name="downloads_status_paused">Pausiert</string>
     <string name="downloads_summary">Aktive Downloads und Speicher an einem Ort verwalten</string>
+    <string name="storage_internal">Intern</string>
+    <string name="storage_external">Extern</string>
+    <string name="storage_free_of_total">%1$s: %2$s frei von %3$s</string>
+    <string name="storage_calculating">%1$s: Wird berechnet…</string>
     <string name="container_storage_title">Speicherverwaltung</string>
     <string name="container_storage_subtitle">Installationen zwischen internem und externem Speicher verschieben</string>
     <string name="container_storage_summary">%1$d Einträge • %2$s</string>
@@ -1413,4 +1417,5 @@
     <string name="game_launch_tip_22">Tipp: Sie können den Touchscreen-Modus aktivieren.</string>
     <string name="game_launch_tip_23">Tipp: Wenn Sie eine Mali-GPU haben, verwenden Sie bitte die Systemtreiber.</string>
     <string name="game_launch_tip_24">Tipp: Zeigt sich ein schwarzer Bildschirm? Versuchen Sie die \"%s\"-Option im Menü, um zu überprüfen, ob Ihre Treiber korrekt funktionieren.</string>
+    <string name="launch_bionic_steam_description">Aktiviert Online-Spiel und verbessert die Kompatibilität\nFunktioniert nicht immer\nSichere deine Spielstände, bevor du es ausprobierst</string>
 </resources>

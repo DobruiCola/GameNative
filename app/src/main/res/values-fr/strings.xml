@@ -103,6 +103,10 @@
     <string name="downloads_status_failed">Échec</string>
     <string name="downloads_status_paused">En pause</string>
     <string name="downloads_summary">Gérez les téléchargements actifs et le stockage au même endroit</string>
+    <string name="storage_internal">Interne</string>
+    <string name="storage_external">Externe</string>
+    <string name="storage_free_of_total">%1$s : %2$s libre sur %3$s</string>
+    <string name="storage_calculating">%1$s : Calcul…</string>
     <string name="container_storage_title">Gestionnaire de stockage</string>
     <string name="container_storage_subtitle">Déplacez les installations entre le stockage interne et externe</string>
     <string name="container_storage_summary">%1$d éléments • %2$s</string>
@@ -1473,4 +1477,5 @@
     <string name="game_launch_tip_22">Conseil : Vous pouvez activer le mode écran tactile.</string>
     <string name="game_launch_tip_23">Conseil : Si vous avez un GPU Mali, veuillez utiliser les pilotes système.</string>
     <string name="game_launch_tip_24">Conseil : Écran noir ? Essayez l\'option \"%s\" dans le menu pour vérifier si vos pilotes fonctionnent correctement.</string>
+    <string name="launch_bionic_steam_description">Active le jeu en ligne et améliore la compatibilité\nNe fonctionne pas toujours\nSauvegardez vos parties avant d’essayer</string>
 </resources>

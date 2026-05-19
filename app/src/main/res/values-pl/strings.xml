@@ -112,6 +112,10 @@
     <string name="downloads_status_failed">Nieudane</string>
     <string name="downloads_status_paused">Wstrzymano</string>
     <string name="downloads_summary">Zarządzaj aktywnymi pobraniami i pamięcią w jednym miejscu</string>
+    <string name="storage_internal">Wewnętrzny</string>
+    <string name="storage_external">Zewnętrzny</string>
+    <string name="storage_free_of_total">%1$s: %2$s wolne z %3$s</string>
+    <string name="storage_calculating">%1$s: Obliczanie…</string>
     <string name="container_storage_title">Menedżer pamięci</string>
     <string name="container_storage_subtitle">Przenoś instalacje między pamięcią wewnętrzną i zewnętrzną</string>
     <string name="container_storage_summary">%1$d elementów • %2$s</string>
@@ -1476,4 +1480,5 @@
     <string name="game_launch_tip_22">Wskazówka: Możesz włączyć tryb ekranu dotykowego.</string>
     <string name="game_launch_tip_23">Wskazówka: Jeśli masz GPU Mali, użyj sterowników systemowych.</string>
     <string name="game_launch_tip_24">Wskazówka: Czarny ekran? Wypróbuj opcję \"%s\" w menu, aby sprawdzić, czy sterowniki działają poprawnie.</string>
+    <string name="launch_bionic_steam_description">Włącza grę online, poprawia kompatybilność\nNie zawsze działa\nPrzed użyciem wykonaj kopię zapasową zapisów</string>
 </resources>
