@@ -476,18 +476,20 @@ fun QuickMenu(
                                         focusRequester = lsfgTabFocusRequester,
                                     )
                                 }
-                                QuickMenuTabButton(
-                                    icon = Icons.Default.AutoFixHigh,
-                                    contentDescriptionResId = R.string.screen_effects,
-                                    selected = selectedTab == QuickMenuTab.EFFECTS,
-                                    accentColor = PluviaTheme.colors.accentPurple,
-                                    onSelected = {
-                                        selectedTab = QuickMenuTab.EFFECTS
-                                        PrefManager.quickMenuLastTab = selectedTab
-                                    },
-                                    modifier = Modifier.width(56.dp),
-                                    focusRequester = effectsTabFocusRequester,
-                                )
+                                if (renderer != null) {
+                                    QuickMenuTabButton(
+                                        icon = Icons.Default.AutoFixHigh,
+                                        contentDescriptionResId = R.string.screen_effects,
+                                        selected = selectedTab == QuickMenuTab.EFFECTS,
+                                        accentColor = PluviaTheme.colors.accentPurple,
+                                        onSelected = {
+                                            selectedTab = QuickMenuTab.EFFECTS
+                                            PrefManager.quickMenuLastTab = selectedTab
+                                        },
+                                        modifier = Modifier.width(56.dp),
+                                        focusRequester = effectsTabFocusRequester,
+                                    )
+                                }
                                 QuickMenuTabButton(
                                     icon = Icons.Default.Gamepad,
                                     contentDescriptionResId = R.string.quick_menu_tab_controller,

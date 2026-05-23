@@ -26,7 +26,7 @@ import java.util.concurrent.Executors;
  * done at construction in the screen layer.
  */
 @SuppressLint("ViewConstructor")
-public class XServerView extends SurfaceView implements SurfaceHolder.Callback {
+public class XServerView extends SurfaceView implements SurfaceHolder.Callback, XServerRendererView {
     private final VulkanRenderer renderer;
     private final XServer xServer;
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();

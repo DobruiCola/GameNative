@@ -16,7 +16,7 @@ import com.winlator.xserver.XServer;
  * The Vulkan-backed default lives in {@link XServerView}.
  */
 @SuppressLint("ViewConstructor")
-public class XServerViewGL extends GLSurfaceView {
+public class XServerViewGL extends GLSurfaceView implements XServerRendererView {
     private final GLRenderer renderer;
     private final XServer xServer;
     private int frameRateLimit = 0;

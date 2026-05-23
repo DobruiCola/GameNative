@@ -19,7 +19,7 @@ import com.winlator.inputcontrols.GamepadState;
 import com.winlator.inputcontrols.TouchMouse;
 import com.winlator.math.XForm;
 import com.winlator.widget.InputControlsView;
-import com.winlator.widget.XServerView;
+import com.winlator.widget.XServerRendererView;
 import com.winlator.xserver.Pointer;
 import com.winlator.xserver.XKeycode;
 import com.winlator.xserver.XServer;
@@ -73,7 +73,7 @@ public class WinHandler {
     private DatagramSocket socket;
     private final ArrayList<Integer> xinputProcesses;
     private final XServer xServer;
-    private final XServerView xServerView;
+    private final XServerRendererView xServerView;
 
     private InputControlsView inputControlsView;
     private Thread rumblePollerThread;
@@ -96,7 +96,7 @@ public class WinHandler {
         BOTH
     }
 
-    public WinHandler(XServer xServer, XServerView xServerView) {
+    public WinHandler(XServer xServer, XServerRendererView xServerView) {
         ByteBuffer allocate = ByteBuffer.allocate(64);
         ByteOrder byteOrder = ByteOrder.LITTLE_ENDIAN;
         ByteBuffer order = allocate.order(byteOrder);

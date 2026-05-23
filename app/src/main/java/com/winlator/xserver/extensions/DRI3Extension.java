@@ -8,7 +8,6 @@ import com.winlator.core.Callback;
 import com.winlator.renderer.GPUImage;
 import com.winlator.renderer.Texture;
 import com.winlator.sysvshm.SysVSharedMemory;
-import com.winlator.widget.XServerView;
 import com.winlator.xconnector.XConnectorEpoll;
 import com.winlator.xconnector.XInputStream;
 import com.winlator.xconnector.XOutputStream;

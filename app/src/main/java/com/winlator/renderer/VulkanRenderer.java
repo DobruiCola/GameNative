@@ -8,6 +8,7 @@ import android.widget.Toast;
 
 import app.gamenative.R;
 import com.winlator.widget.FrameRating;
+import com.winlator.widget.XServerRendererView;
 import com.winlator.widget.XServerView;
 import com.winlator.xserver.Bitmask;
 import com.winlator.xserver.Cursor;
@@ -37,7 +38,8 @@ import java.util.ArrayList;
  *     {@code driverPath}/{@code libraryName} args are passed but ignored.
  */
 public class VulkanRenderer implements WindowManager.OnWindowModificationListener,
-                                       Pointer.OnPointerMotionListener {
+                                       Pointer.OnPointerMotionListener,
+                                       XServerRenderer {
 
     static { System.loadLibrary("vulkan_renderer"); }
     public static final int EFFECT_NONE = 0;
@@ -698,11 +700,13 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
 
     private FrameRating hudRef = null;
 
-    public void setFrameRating(Object fr) {
-        if (fr instanceof FrameRating) hudRef = (FrameRating) fr;
+    @Override
+    public void setFrameRating(FrameRating fr) {
+        hudRef = fr;
     }
 
     public boolean isFullscreen() { return fullscreen; }
+    @Override public XServerRendererView getRendererView() { return xServerView; }
     public void toggleFullscreen() { fullscreen = !fullscreen; synchronized (lock) { updateTransform(); } xServerView.queueEvent(this::updateScene); }
 
     // ---------------------------------------------------------------------

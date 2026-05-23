@@ -145,7 +145,12 @@ import com.winlator.inputcontrols.TouchMouse
 import com.winlator.widget.FrameRating
 import com.winlator.widget.InputControlsView
 import com.winlator.widget.TouchpadView
+import com.winlator.renderer.GLRenderer
+import com.winlator.renderer.VulkanRenderer
+import com.winlator.renderer.XServerRenderer
+import com.winlator.widget.XServerRendererView
 import com.winlator.widget.XServerView
+import com.winlator.widget.XServerViewGL
 import com.winlator.winhandler.WinHandler
 import com.winlator.winhandler.WinHandler.PreferredInputApi
 import com.winlator.winhandler.OnGetProcessInfoListener
@@ -243,7 +248,7 @@ private fun detectMaxRefreshRateHz(context: Context, attachedView: View?): Int {
 }
 
 private data class XServerViewReleaseBinding(
-    val xServerView: XServerView,
+    val xServerView: XServerRendererView,
     val windowModificationListener: WindowManager.OnWindowModificationListener,
 )
 
@@ -388,8 +393,8 @@ fun XServerScreen(
 
     var currentAppInfo = SteamService.getAppInfoOf(gameId)
 
-    var xServerView: XServerView? by remember {
-        val result = mutableStateOf<XServerView?>(null)
+    var xServerView: XServerRendererView? by remember {
+        val result = mutableStateOf<XServerRendererView?>(null)
         Timber.i("Remembering xServerView as $result")
         result
     }
@@ -522,7 +527,7 @@ fun XServerScreen(
     }
 
     LaunchedEffect(xServerView?.renderer) {
-        xServerView?.renderer?.let { renderer ->
+        (xServerView?.renderer as? VulkanRenderer)?.let { renderer ->
             applyScreenEffectsConfig(renderer, loadScreenEffectsConfig(container))
         }
     }
@@ -578,7 +583,7 @@ fun XServerScreen(
     }
 
     LaunchedEffect(xServerView) {
-        val detectedMax = detectMaxRefreshRateHz(context, xServerView)
+        val detectedMax = detectMaxRefreshRateHz(context, xServerView as? View)
         detectedMaxRefreshRateHz = detectedMax
         val clampedTarget = fpsLimiterTarget.coerceAtMost(detectedMax).coerceAtLeast(5)
         if (clampedTarget != fpsLimiterTarget) {
@@ -1430,11 +1435,12 @@ fun XServerScreen(
 
     DisposableEffect(lifecycleOwner, xServerView) {
         val currentXServerView = xServerView
-        if (currentXServerView == null) {
+        val currentXServerViewAsView = currentXServerView as? View
+        if (currentXServerView == null || currentXServerViewAsView == null) {
             onDispose { }
         } else {
             fun syncRendererToCurrentLifecycleState() {
-                if (!currentXServerView.isAttachedToWindow) return
+                if (!currentXServerViewAsView.isAttachedToWindow) return
 
                 when {
                     lifecycleOwner.lifecycle.currentState == Lifecycle.State.DESTROYED -> Unit
@@ -1468,10 +1474,10 @@ fun XServerScreen(
             }
 
             lifecycleOwner.lifecycle.addObserver(observer)
-            currentXServerView.addOnAttachStateChangeListener(attachStateListener)
+            currentXServerViewAsView.addOnAttachStateChangeListener(attachStateListener)
             syncRendererToCurrentLifecycleState()
             onDispose {
-                currentXServerView.removeOnAttachStateChangeListener(attachStateListener)
+                currentXServerViewAsView.removeOnAttachStateChangeListener(attachStateListener)
                 lifecycleOwner.lifecycle.removeObserver(observer)
             }
         }
@@ -1638,10 +1644,13 @@ fun XServerScreen(
                     ?.getComponent<XServerComponent>(XServerComponent::class.java)
                     ?.xServer
             val xServerToUse = existingXServer ?: XServer(ScreenInfo(xServerState.value.screenSize), usrGlibc)
-            val xServerView = XServerView(
-                context,
-                xServerToUse,
-            ).apply {
+            val useGLRenderer = container.graphicsDriver == "virgl"
+            val xServerViewInstance: XServerRendererView = if (useGLRenderer) {
+                XServerViewGL(context, xServerToUse)
+            } else {
+                XServerView(context, xServerToUse)
+            }
+            val xServerView = xServerViewInstance.apply {
                 xServerView = this
                 setFrameRateLimit(if (fpsLimiterEnabled) fpsLimiterTarget else 0)
                 val renderer = this.renderer
@@ -2014,7 +2023,7 @@ fun XServerScreen(
                 )
             }
             frameLayout.addView(gameHost)
-            gameHost.addView(xServerView)
+            gameHost.addView(xServerView as View)
 
             PluviaApp.inputControlsManager = InputControlsManager(context)
 
@@ -2133,7 +2142,7 @@ fun XServerScreen(
                     val surfaceBg = ContextCompat.getColor(context, R.color.external_display_surface_background)
                     ExternalDisplaySwapController(
                         context = context,
-                        xServerViewProvider = { xServerView },
+                        xServerViewProvider = { xServerView as? View },
                         internalGameHostProvider = { gameHost },
                         onGameOnExternalChanged = { gameOnExternal ->
                             if (gameOnExternal) {
@@ -2410,7 +2419,7 @@ fun XServerScreen(
             isVisible = showQuickMenu,
             onDismiss = dismissOverlayMenu,
             onItemSelected = onQuickMenuItemSelected,
-            renderer = xServerView?.renderer,
+            renderer = xServerView?.renderer as? VulkanRenderer,
             container = container,
             wineProcesses = quickMenuWineProcesses,
             isWineProcessesLoading = quickMenuWineProcessesLoading,
