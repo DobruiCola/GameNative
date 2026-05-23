@@ -462,11 +462,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
 
     @Override
     public void onUpdateWindowContent(Window window) {
+        if (hudRef != null) hudRef.update();
         final long handle;
         synchronized (lock) { handle = nativeHandle; }
         if (handle == 0) return;
-        if (shouldDropForFpsLimit()) return;
-        if (hudRef != null) hudRef.update();
 
         Drawable drawable = window.getContent();
         if (drawable == null || !window.attributes.isMapped()) return;
@@ -729,24 +728,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     public float getMagnifierZoom() { return magnifierZoom; }
     public void setUnviewableWMClasses(String... classes) { this.unviewableWMClasses = classes; }
     private int fpsLimit = 0;
-    private volatile long fpsLimitIntervalNs = 0L;
-    private volatile long lastPushNs = 0L;
     private int refreshRateLimit = 60;
-
-    // Compositor push-rate throttle. Caps how often we hand a new frame to the
-    // Vulkan swapchain so non-DXVK games (which bypass PresentExtension's
-    // back-pressure) still see the user's FPS limit reflected on screen. Game
-    // CPU/GPU work is not reduced — this is the same kind of cap the old
-    // GLSurfaceView vsync provided, but tied to the slider value.
-    private boolean shouldDropForFpsLimit() {
-        long intervalNs = fpsLimitIntervalNs;
-        if (intervalNs <= 0L) return false;
-        long now = System.nanoTime();
-        if (now - lastPushNs < intervalNs) return true;
-        lastPushNs = now;
-        return false;
-    }
-
     private int     pendingPresentMode    = 1;
     private int     pendingFilterMode     = 0;
     private boolean pendingSwapRB         = false;
@@ -755,8 +737,6 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     public int getFpsLimit() { return fpsLimit; }
     public void setFpsLimit(int limit) {
         this.fpsLimit = limit;
-        this.fpsLimitIntervalNs = limit > 0 ? 1_000_000_000L / limit : 0L;
-        this.lastPushNs = 0L;
         if (android.os.Build.VERSION.SDK_INT >= 30 && scanoutGameSC != null) {
             float targetFps = limit > 0 ? (float)limit
                 : xServerView.getDisplay() != null

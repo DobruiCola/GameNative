@@ -80,14 +80,16 @@ import kotlin.math.abs
 private const val SCREEN_EFFECT_PERCENT_STEP = 5f
 private const val SCREEN_EFFECT_GAMMA_STEP = 0.1f
 
-// The Vulkan compositor only supports a small effect set (NONE / FSR / DLS / CRT
-// / HDR / NATURAL). Pluvia's older GL-style effects (Toon, FXAA, Vivid, NTSC,
-// nearest/linear/fill/stretch scaling, brightness/contrast/gamma color grading)
-// have no Vulkan equivalent yet and are hidden from the Quick Menu's Effects tab.
+// The Vulkan compositor supports a small effect set (NONE / FSR / DLS / CRT
+// / HDR / NATURAL). The slider picks the scaling-style effect (None / FSR /
+// FSR Fit / DLS / Natural). CRT and Vivid (HDR) are toggles; the toggles win
+// over the slider (see applyScreenEffectsConfig priority).
 private val VULKAN_SUPPORTED_SCALING_MODES = listOf(
     ScreenEffectsConfig.SCALING_MODE_NONE,
     ScreenEffectsConfig.SCALING_MODE_FSR,
     ScreenEffectsConfig.SCALING_MODE_FSR_ASPECT,
+    ScreenEffectsConfig.SCALING_MODE_DLS,
+    ScreenEffectsConfig.SCALING_MODE_NATURAL,
 )
 
 private fun scalingModeLabelRes(mode: Int): Int = when (mode) {
@@ -97,6 +99,8 @@ private fun scalingModeLabelRes(mode: Int): Int = when (mode) {
     ScreenEffectsConfig.SCALING_MODE_STRETCH -> R.string.screen_effects_scaling_mode_stretch
     ScreenEffectsConfig.SCALING_MODE_FSR -> R.string.screen_effects_scaling_mode_fsr
     ScreenEffectsConfig.SCALING_MODE_FSR_ASPECT -> R.string.screen_effects_scaling_mode_fsr_aspect
+    ScreenEffectsConfig.SCALING_MODE_DLS -> R.string.screen_effects_scaling_mode_dls
+    ScreenEffectsConfig.SCALING_MODE_NATURAL -> R.string.screen_effects_scaling_mode_natural
     else -> R.string.screen_effects_scaling_mode_none
 }
 
@@ -124,14 +128,18 @@ fun ScreenEffectsTabContent(
     var fsrSharpnessLevel by remember(renderer, container) {
         mutableIntStateOf(initialConfig.fsrSharpnessLevel)
     }
+    var enableVivid by remember(renderer, container) {
+        mutableStateOf(initialConfig.enableVivid)
+    }
     var enableCRT by remember(renderer, container) {
         mutableStateOf(initialConfig.enableCRT)
     }
 
-    LaunchedEffect(scalingMode, fsrSharpnessLevel, enableCRT) {
+    LaunchedEffect(scalingMode, fsrSharpnessLevel, enableVivid, enableCRT) {
         val config = initialConfig.copy(
             scalingMode = scalingMode,
             fsrSharpnessLevel = fsrSharpnessLevel,
+            enableVivid = enableVivid,
             enableCRT = enableCRT,
         )
         // Apply immediately for live preview
@@ -145,6 +153,7 @@ fun ScreenEffectsTabContent(
     fun resetEffects() {
         scalingMode = ScreenEffectsConfig.SCALING_MODE_NONE
         fsrSharpnessLevel = ScreenEffectsConfig.FSR_DEFAULT_LEVEL
+        enableVivid = false
         enableCRT = false
     }
 
@@ -175,7 +184,9 @@ fun ScreenEffectsTabContent(
             },
             focusRequester = firstItemFocusRequester,
         )
-        if (scalingMode == ScreenEffectsConfig.SCALING_MODE_FSR || scalingMode == ScreenEffectsConfig.SCALING_MODE_FSR_ASPECT) {
+        if (scalingMode == ScreenEffectsConfig.SCALING_MODE_FSR ||
+            scalingMode == ScreenEffectsConfig.SCALING_MODE_FSR_ASPECT ||
+            scalingMode == ScreenEffectsConfig.SCALING_MODE_DLS) {
             ScreenEffectAdjustmentRow(
                 title = stringResource(R.string.screen_effects_fsr_sharpness),
                 valueText = stringResource(R.string.screen_effects_fsr_sharpness_value, fsrSharpnessLevel),
@@ -197,6 +208,12 @@ fun ScreenEffectsTabContent(
 
         OptionSectionHeader(text = stringResource(R.string.screen_effects_shader_toggles))
 
+        ScreenEffectToggleRow(
+            title = stringResource(R.string.screen_effects_vivid),
+            subtitle = stringResource(R.string.screen_effects_vivid_description),
+            enabled = enableVivid,
+            onToggle = { enableVivid = !enableVivid },
+        )
         ScreenEffectToggleRow(
             title = stringResource(R.string.screen_effects_crt),
             subtitle = stringResource(R.string.screen_effects_crt_description),

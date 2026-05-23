@@ -34,6 +34,8 @@ data class ScreenEffectsConfig(
         const val SCALING_MODE_STRETCH = 4
         const val SCALING_MODE_FSR = 5
         const val SCALING_MODE_FSR_ASPECT = 6
+        const val SCALING_MODE_DLS = 7
+        const val SCALING_MODE_NATURAL = 8
         const val FSR_MIN_LEVEL = 1
         const val FSR_MAX_LEVEL = 5
         const val FSR_DEFAULT_LEVEL = 3
@@ -99,21 +101,26 @@ fun fsrQuickMenuLevelToStops(level: Int): Float {
 }
 
 /**
- * Maps Pluvia's rich screen-effects config onto VulkanRenderer's compact effect set.
+ * Maps Pluvia's screen-effects config onto VulkanRenderer's compact effect set.
  *
- * The Vulkan compositor (ported from Winlator-Ludashi) only supports five
- * post-process effects: NONE / FSR / DLS / CRT / HDR / NATURAL. Pluvia's broader
- * GL effects (Toon, FXAA, Vivid, NTSC, scaling modes, color grading) have no
- * direct Vulkan equivalent yet — they're silently ignored. FSR sharpness levels
- * 0..4 are mapped onto the 0.0..1.0 sharpness range the native side expects.
+ * The Vulkan compositor runs one effect at a time (FSR / DLS / CRT / HDR /
+ * NATURAL). We resolve user selections by priority: Vivid (HDR) > CRT >
+ * slider effect (DLS / Natural / FSR scaling) > None. Sharpness applies to FSR
+ * and DLS only.
+ *
+ * Pluvia's older GL effects (Toon, FXAA, NTSC, brightness/contrast/gamma) have
+ * no Vulkan equivalent and are silently ignored.
  */
 fun applyScreenEffectsConfig(renderer: VulkanRenderer, config: ScreenEffectsConfig) {
-    val effectId = when (config.scalingMode) {
-        ScreenEffectsConfig.SCALING_MODE_FSR,
-        ScreenEffectsConfig.SCALING_MODE_FSR_ASPECT -> VulkanRenderer.EFFECT_FSR
-        else -> if (config.enableCRT) VulkanRenderer.EFFECT_CRT else VulkanRenderer.EFFECT_NONE
+    val effectId = when {
+        config.enableVivid -> VulkanRenderer.EFFECT_HDR
+        config.enableCRT -> VulkanRenderer.EFFECT_CRT
+        config.scalingMode == ScreenEffectsConfig.SCALING_MODE_FSR ||
+            config.scalingMode == ScreenEffectsConfig.SCALING_MODE_FSR_ASPECT -> VulkanRenderer.EFFECT_FSR
+        config.scalingMode == ScreenEffectsConfig.SCALING_MODE_DLS -> VulkanRenderer.EFFECT_DLS
+        config.scalingMode == ScreenEffectsConfig.SCALING_MODE_NATURAL -> VulkanRenderer.EFFECT_NATURAL
+        else -> VulkanRenderer.EFFECT_NONE
     }
-    // fsrSharpnessLevel is 0..4 (quick-menu steps); native expects 0.0..1.0.
     val sharpness = (config.fsrSharpnessLevel.coerceIn(0, 4)) / 4.0f
     renderer.setEffect(effectId, sharpness)
 }
