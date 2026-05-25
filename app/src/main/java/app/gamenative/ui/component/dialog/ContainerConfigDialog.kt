@@ -603,8 +603,8 @@ fun ContainerConfigDialog(
         var adrenotoolsTurnipChecked by adrenotoolsTurnipCheckedRef
         LaunchedEffect(config.graphicsDriverConfig) {
             val cfg = KeyValueSet(config.graphicsDriverConfig)
-            val presentMode = cfg.get("presentMode", "mailbox")
-            val defaultPresentIdx = presentModes.indexOfFirst { it.equals("mailbox", true) }.takeIf { it >= 0 } ?: 0
+            val presentMode = cfg.get("vkPresentMode", "fifo")
+            val defaultPresentIdx = presentModes.indexOfFirst { it.equals("fifo", true) }.takeIf { it >= 0 } ?: 0
             presentModeIndex =
                 presentModes.indexOfFirst { it.equals(presentMode, true) }.let { if (it >= 0) it else defaultPresentIdx }
 

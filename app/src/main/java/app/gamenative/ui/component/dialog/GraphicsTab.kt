@@ -133,7 +133,9 @@ fun GraphicsTabContent(state: ContainerConfigState, default: Boolean = false) {
                 onItemSelected = { idx ->
                     state.presentModeIndex.value = idx
                     val cfg = KeyValueSet(config.graphicsDriverConfig)
-                    cfg.put("presentMode", state.presentModes[idx])
+                    val selected = state.presentModes[idx]
+                    cfg.put("presentMode", selected)
+                    cfg.put("vkPresentMode", selected)
                     state.config.value = config.copy(graphicsDriverConfig = cfg.toString())
                 },
             )

@@ -710,7 +710,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     public void setUnviewableWMClasses(String... classes) { this.unviewableWMClasses = classes; }
     private int fpsLimit = 0;
     private int refreshRateLimit = 60;
-    private int     pendingPresentMode    = 1;
+    private int     pendingPresentMode    = 2;
     private int     pendingFilterMode     = 0;
     private boolean pendingSwapRB         = false;
     private int     pendingEffectId       = EFFECT_NONE;
