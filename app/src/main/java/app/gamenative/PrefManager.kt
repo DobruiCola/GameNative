@@ -195,6 +195,13 @@ object PrefManager {
             setPref(GRAPHICS_DRIVER_CONFIG, value)
         }
 
+    private val RENDERER_PRESENT_MODE = stringPreferencesKey("renderer_present_mode")
+    var rendererPresentMode: String
+        get() = getPref(RENDERER_PRESENT_MODE, "fifo")
+        set(value) {
+            setPref(RENDERER_PRESENT_MODE, value)
+        }
+
     private val SHARPNESS_EFFECT = stringPreferencesKey("sharpness_effect")
     var sharpnessEffect: String
         get() = getPref(SHARPNESS_EFFECT, "None")
