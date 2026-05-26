@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -451,36 +452,41 @@ fun SettingsGroupInterface(
         // All writable non-primary volumes (SD / USB).
         // getExternalFilesDirs misses USB OTG on most devices, so also enumerate
         // StorageManager.storageVolumes and synthesize the per-app files dir.
-        val dirs = remember {
-            val seen = mutableSetOf<String>()
-            val result = mutableListOf<File>()
+        // Runs off the composition thread because synthesizing the USB candidate
+        // may need mkdirs() on first plug-in.
+        val externalStorageFallbackLabel = stringResource(R.string.storage_external)
+        val dirs by produceState(initialValue = emptyList<File>(), ctx) {
+            value = withContext(Dispatchers.IO) {
+                val seen = mutableSetOf<String>()
+                val result = mutableListOf<File>()
 
-            fun tryAdd(dir: File?) {
-                if (dir == null) return
-                if (Environment.getExternalStorageState(dir) != Environment.MEDIA_MOUNTED) return
-                if (sm?.getStorageVolume(dir)?.isPrimary == true) return
-                if (seen.add(dir.absolutePath)) result += dir
-            }
-
-            ctx.getExternalFilesDirs(null)?.forEach { tryAdd(it) }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                sm?.storageVolumes?.forEach { volume ->
-                    if (volume.isPrimary) return@forEach
-                    val volDir = volume.directory ?: return@forEach
-                    val candidate = File(volDir, "Android/data/${ctx.packageName}/files")
-                    if (!candidate.isDirectory) candidate.mkdirs()
-                    if (candidate.isDirectory) tryAdd(candidate)
+                fun tryAdd(dir: File?) {
+                    if (dir == null) return
+                    if (Environment.getExternalStorageState(dir) != Environment.MEDIA_MOUNTED) return
+                    if (sm?.getStorageVolume(dir)?.isPrimary == true) return
+                    if (seen.add(dir.absolutePath)) result += dir
                 }
-            }
 
-            result
+                ctx.getExternalFilesDirs(null)?.forEach { tryAdd(it) }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    sm?.storageVolumes?.forEach { volume ->
+                        if (volume.isPrimary) return@forEach
+                        val volDir = volume.directory ?: return@forEach
+                        val candidate = File(volDir, "Android/data/${ctx.packageName}/files")
+                        if (!candidate.isDirectory) candidate.mkdirs()
+                        if (candidate.isDirectory) tryAdd(candidate)
+                    }
+                }
+
+                result
+            }
         }
 
         // Labels the user sees
         val labels = remember(dirs) {
             dirs.map { dir ->
-                sm?.getStorageVolume(dir)?.getDescription(ctx) ?: dir.name
+                sm?.getStorageVolume(dir)?.getDescription(ctx) ?: externalStorageFallbackLabel
             }
         }
         var useExternalStorage by rememberSaveable { mutableStateOf(PrefManager.useExternalStorage) }
