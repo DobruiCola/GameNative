@@ -3065,7 +3065,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             val userStats = instance?._steamUserStats!!.getUserStats(appId, steamUser.steamID!!).await()
             val schemaArray = userStats.schema.toByteArray()
             val generator = StatsAchievementsGenerator()
-            val result = generator.generateStatsAchievements(schemaArray, configDirectory)
+            val result = generator.generateStatsAchievements(schemaArray, userStats, configDirectory)
             cachedAchievements = result.achievements
             cachedAchievementsAppId = appId
 
@@ -3079,6 +3079,53 @@ class SteamService : Service(), IChallengeUrlChanged {
                     mappingJson.put(name, JSONArray(listOf(pair.first, pair.second)))
                 }
                 File(configDir, "achievement_name_to_block.json").writeText(mappingJson.toString(), Charsets.UTF_8)
+            }
+
+            // Seed the GSE Saves file with the real earned state from Steam to avoid re-trigger notifications
+            val context = instance!!.applicationContext
+            val gseDirs = getGseSaveDirs(context, appId)
+            seedGseSaveAchievements(gseDirs, result.achievements)
+        }
+
+        // Seed the GSE achievements file to ensure that we don't get early unlock triggers (Games such as Brotato do re-triggers on launch).
+        // merges results with ones from Steam Servers so we don't overwrite offline achievements.
+        private fun seedGseSaveAchievements(dirs: List<File>, achievements: List<app.gamenative.statsgen.Achievement>) {
+            if (achievements.isEmpty()) return
+            for (dir in dirs) {
+                try {
+                    dir.mkdirs()
+                    val file = File(dir, "achievements.json")
+                    // grab existing file or create new if nothing exists.
+                    val merged = if (file.exists()) {
+                        try {
+                            JSONObject(file.readText(Charsets.UTF_8))
+                        } catch (e: Exception) {
+                            Timber.w(e, "Failed to parse existing GSE achievements.json in ${dir.absolutePath}, starting fresh")
+                            JSONObject()
+                        }
+                    } else {
+                        JSONObject()
+                    }
+
+                    // Apply achievements earned & timestamp to file where matched & persists local if local is earned & timestamped.
+                    for (ach in achievements) {
+                        val existing = if (merged.has(ach.name)) merged.getJSONObject(ach.name) else JSONObject()
+                        val localEarned = existing.optBoolean("earned", false)
+                        val steamEarned = ach.unlocked ?: false
+                        val earned = localEarned || steamEarned
+                        val localTime = existing.optLong("earned_time", 0L)
+                        val steamTime = (ach.unlockTimestamp ?: 0).toLong()
+                        val earnedTime = maxOf(localTime, steamTime)
+                        existing.put("earned", earned)
+                        existing.put("earned_time", earnedTime)
+                        merged.put(ach.name, existing)
+                    }
+
+                    file.writeText(merged.toString(2), Charsets.UTF_8)
+                    Timber.d("Seeded GSE Saves achievements.json in ${dir.absolutePath}")
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to seed GSE Saves achievements.json in ${dir.absolutePath}")
+                }
             }
         }
 
