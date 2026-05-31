@@ -5,12 +5,15 @@ package app.gamenative.ui.screen.library
 import android.content.Intent
 import android.content.res.Configuration
 import app.gamenative.ui.screen.library.components.ambient.AmbientDownloadOverlay
+import android.content.ActivityNotFoundException
+import android.net.Uri
 import android.view.KeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.*
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -46,6 +49,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -126,6 +130,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 // https://partner.steamgames.com/doc/store/assets/libraryassets#4
 
@@ -451,40 +456,70 @@ private fun InfoCard(
 }
 
 @Composable
-private fun HltbInfoCards(
+private fun HltbInfoBar(
     stats: HltbService.Stats,
     modifier: Modifier = Modifier,
 ) {
-    val rows = listOf(
+    val context = LocalContext.current
+    val items = listOf(
         stringResource(R.string.hltb_main_story) to stats.mainHours,
         stringResource(R.string.hltb_main_plus_extras) to stats.mainPlusHours,
         stringResource(R.string.hltb_completionist) to stats.completeHours,
         stringResource(R.string.hltb_all_styles) to stats.allStylesHours,
-    ).chunked(2)
+    )
+    val canOpenHltb = stats.gameId > 0
 
-    Column(modifier = modifier) {
-        rows.forEachIndexed { index, row ->
-            if (index > 0) {
-                Spacer(modifier = Modifier.height(10.dp))
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                row.forEach { (label, hours) ->
-                    InfoCard(
-                        label = label,
-                        value = if (hours == HltbService.UNKNOWN_HOURS) {
-                            HltbService.UNKNOWN_HOURS
-                        } else {
-                            stringResource(R.string.hltb_hours_value, hours)
-                        },
-                        isCompact = true,
-                        modifier = Modifier.weight(1f),
-                        focusableForNavigation = true,
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickable(enabled = canOpenHltb) {
+                try {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("${HltbService.GAME_URL}${stats.gameId}")),
                     )
+                } catch (e: ActivityNotFoundException) {
+                    Timber.tag("HLTB").w(e, "No handler for HLTB game URL")
                 }
             }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items.forEach { (label, hours) ->
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = if (hours == HltbService.UNKNOWN_HOURS) {
+                        HltbService.UNKNOWN_HOURS
+                    } else {
+                        stringResource(R.string.hltb_hours_value, hours)
+                    },
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        if (canOpenHltb) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }
@@ -1066,6 +1101,11 @@ internal fun AppScreenContent(
                     )
                 }
 
+                displayInfo.hltbStats?.let { hltb ->
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HltbInfoBar(hltb)
+                }
+
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Row(
@@ -1135,10 +1175,6 @@ internal fun AppScreenContent(
                     }
                 }
 
-                displayInfo.hltbStats?.let { hltb ->
-                    Spacer(modifier = Modifier.height(10.dp))
-                    HltbInfoCards(hltb)
-                }
             }
         }
 
