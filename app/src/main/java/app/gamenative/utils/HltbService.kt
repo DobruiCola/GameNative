@@ -37,6 +37,7 @@ object HltbService {
     private const val INIT_PATH = "$SEARCH_PATH/init"
     private const val UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36"
+    const val UNKNOWN_HOURS = "--"
 
     @Serializable
     data class Stats(
@@ -80,8 +81,11 @@ object HltbService {
             httpClient.newCall(buildSearchRequest(name, a)).execute().use { response ->
                 if (!response.isSuccessful) {
                     Timber.tag("HLTB").w("Search HTTP ${response.code} for '$name'")
-                    auth = null
-                    return@withContext SearchResult.AuthRejected
+                    if (response.code == 401 || response.code == 403) {
+                        auth = null
+                        return@withContext SearchResult.AuthRejected
+                    }
+                    return@withContext SearchResult.NoMatch
                 }
 
                 parseSearchResponse(name, response.body?.string() ?: return@withContext SearchResult.NoMatch)
@@ -229,7 +233,7 @@ object HltbService {
         return distance <= distanceThreshold
     }
 
-    internal fun formatHours(seconds: Long) = if (seconds <= 0) "--" else "%.1f".format(seconds / 3600.0)
+    internal fun formatHours(seconds: Long) = if (seconds <= 0) UNKNOWN_HOURS else "%.1f".format(seconds / 3600.0)
     internal fun normalize(input: String) = normalizedKey(input)
     internal fun levenshtein(left: String, right: String): Int {
         if (left == right) return 0

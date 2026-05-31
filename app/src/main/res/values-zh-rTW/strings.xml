@@ -1500,6 +1500,7 @@
     <string name="hltb_main_plus_extras">主線 + 支線</string>
     <string name="hltb_completionist">完美主義者</string>
     <string name="hltb_all_styles">所有風格</string>
+    <string name="hltb_hours_value">%sh</string>
 
     <!-- LSFG-VK frame generation -->
     <string name="lsfg_tab_title">LSFG-VK</string>

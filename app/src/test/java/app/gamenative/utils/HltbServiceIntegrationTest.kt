@@ -118,6 +118,22 @@ class HltbServiceIntegrationTest {
         assertEquals(232, stats?.gameId)
     }
 
+    @Test
+    fun getStats_doesNotRefreshAuthAfterTransientSearchError() = runBlocking {
+        enqueueAuthResponse()
+        server.enqueue(MockResponse().setResponseCode(500))
+        enqueueSearchResponse(game("Celeste", 14400, 21600, 28800, 32400, 99))
+
+        assertNull(HltbService.getStats("Celeste"))
+        assertEquals(2, server.requestCount)
+
+        val stats = HltbService.getStats("Celeste")
+
+        assertNotNull(stats)
+        assertEquals("4.0", stats?.mainHours)
+        assertEquals(3, server.requestCount)
+    }
+
     private fun enqueueAuthResponse() {
         server.enqueue(
             MockResponse().setResponseCode(200).setBody(

@@ -474,7 +474,11 @@ private fun HltbInfoCards(
                 row.forEach { (label, hours) ->
                     InfoCard(
                         label = label,
-                        value = if (hours == "--") "--" else "${hours}h",
+                        value = if (hours == HltbService.UNKNOWN_HOURS) {
+                            HltbService.UNKNOWN_HOURS
+                        } else {
+                            stringResource(R.string.hltb_hours_value, hours)
+                        },
                         isCompact = true,
                         modifier = Modifier.weight(1f),
                         focusableForNavigation = true,
