@@ -489,7 +489,7 @@ private fun HltbInfoBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
-            modifier = Modifier.width(130.dp),
+            modifier = Modifier.width(76.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
