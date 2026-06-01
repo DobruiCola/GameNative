@@ -1432,6 +1432,7 @@
     <string name="hltb_completionist">Completista</string>
     <string name="hltb_all_styles">Tutti gli stili</string>
     <string name="hltb_hours_value">%sh</string>
+    <string name="hltb_section_title">How Long To Beat</string>
 
     <!-- LSFG-VK frame generation -->
     <string name="lsfg_tab_title">LSFG-VK</string>

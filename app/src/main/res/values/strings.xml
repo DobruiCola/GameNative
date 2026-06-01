@@ -1505,6 +1505,7 @@
     <string name="hltb_completionist">Completionist</string>
     <string name="hltb_all_styles">All Styles</string>
     <string name="hltb_hours_value">%sh</string>
+    <string name="hltb_section_title">How Long To Beat</string>
 
     <!-- Game Launch Tips -->
     <string name="game_launch_tip_1">Booting may take a few minutes on first launch</string>
