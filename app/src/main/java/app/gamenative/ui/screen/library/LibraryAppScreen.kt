@@ -469,10 +469,10 @@ private fun HltbInfoBar(
     )
     val canOpenHltb = stats.gameId > 0
 
-    Column(
+    Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 98.dp)
+            .heightIn(min = 78.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable(enabled = canOpenHltb) {
@@ -485,17 +485,22 @@ private fun HltbInfoBar(
                 }
             }
             .padding(horizontal = 12.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.width(130.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = stringResource(R.string.hltb_section_title),
+                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
             if (canOpenHltb) {
                 Icon(
@@ -507,10 +512,8 @@ private fun HltbInfoBar(
             }
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
-
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.weight(1f),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
