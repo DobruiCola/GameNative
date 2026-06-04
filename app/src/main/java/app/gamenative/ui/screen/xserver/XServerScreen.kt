@@ -4735,7 +4735,10 @@ private fun extractGraphicsDriverFiles(
         if (graphicsDriver == "turnip") {
             cacheId += "-" + turnipVersion + "-" + zinkVersion
             if (GPUInformation.isAdreno710_720_732(context)) {
-                envVars.put("TU_DEBUG", "gmem");
+                val userEnvVars = EnvVars(container.envVars)
+                val tuDebug = userEnvVars.get("TU_DEBUG")
+                if (!tuDebug.contains("gmem")) userEnvVars.put("TU_DEBUG", (if (!tuDebug.isEmpty()) "$tuDebug," else "") + "gmem")
+                container.envVars = userEnvVars.toString()
             } else if (turnipVersion == "25.2.0" || turnipVersion == "25.3.0") {
                 envVars.put("TU_DEBUG", "sysmem");
             }

@@ -239,7 +239,10 @@ object BestConfigService {
             filteredJson.put("dxwrapperConfig", kvs.toString())
         }
 
-        if (GPUInformation.isAdreno8EliteGen5(context) && !matched.matches(Regex(".*adreno.*\\b8(4[0-9]|5[0-9])\\b.*"))) {
+        if (GPUInformation.isAdreno8EliteGen5(context) &&
+            !matched.matches(Regex(".*adreno.*\\b8(4[0-9]|5[0-9])\\b.*")) &&
+            !GPUBlackist.isTurnipBlacklisted()
+        ) {
             val kvs = KeyValueSet(filteredJson.optString("graphicsDriverConfig", ""))
             kvs.put("version", "Turnip Adreno Driver T26 (@Mr_Purple_666)")
             filteredJson.put("graphicsDriverConfig", kvs.toString())
