@@ -347,6 +347,8 @@ public class PulseAudioComponent extends EnvironmentComponent {
                 }
             } else {
                 execPactlCommand("suspend-sink " + SINK_NAME + " true");
+                audioManager.abandonAudioFocusRequest(audioFocusRequest);
+                Timber.tag("PulseAudioComponent").d("abandonAudioFocusRequest on suspend = true");
             }
         }
     }
