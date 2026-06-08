@@ -534,7 +534,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             nativeSetPointerPos(nativeHandle, x, y);
             Window pw = xServer.inputDeviceManager.getPointWindow();
             Cursor cursor = pw != null ? pw.attributes.getCursor() : null;
-            lastCursor = cursor; sendCursorToNative(cursor);
+            if (cursor != lastCursor) { lastCursor = cursor; sendCursorToNative(cursor); }
             if (nativeMode) {
                 short hotX = 0, hotY = 0;
                 if (cursor != null) { hotX = (short)cursor.hotSpotX; hotY = (short)cursor.hotSpotY; }
