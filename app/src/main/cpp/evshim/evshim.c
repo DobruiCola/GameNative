@@ -226,6 +226,7 @@ static bool try_read_state(struct gamepad_io *s, uint32_t *last_seq, struct game
 static void *vjoy_updater(void *arg)
 {
     int idx = (int)(intptr_t)arg;
+    int tid = (int)syscall(SYS_gettid);
     struct gamepad_io *s = shm[idx];
 
     SDL_Joystick *js = p_SDL_JoystickOpen(vjoy_ids[idx]);
@@ -254,6 +255,7 @@ static void *vjoy_updater(void *arg)
         struct gamepad_io snap;
 
         if (try_read_state(s, &last_seq, &snap)) {
+            LOGD("evshim: vjoy_updater P%d tid=%d state changed seq=%u\n", idx, tid, last_seq);
             p_SDL_JoystickSetVirtualAxis(js, 0, snap.state.lx);
             p_SDL_JoystickSetVirtualAxis(js, 1, snap.state.ly);
             p_SDL_JoystickSetVirtualAxis(js, 2, snap.state.rx);
@@ -361,8 +363,9 @@ Java_com_winlator_winhandler_WinHandler_notifyStateChanged(JNIEnv *env, jclass c
     if (idx < 0 || idx >= MAX_GAMEPADS || !shm[idx]) return;
 
     atomic_thread_fence(memory_order_seq_cst); // not sure if necessary
-    atomic_fetch_add_explicit(&shm[idx]->seq, 1u, memory_order_release);
+    unsigned new_seq = atomic_fetch_add_explicit(&shm[idx]->seq, 1u, memory_order_release) + 1u;
     syscall(SYS_futex, &shm[idx]->seq, FUTEX_WAKE, INT_MAX, NULL, NULL, 0);
+    ALOGD("evshim: notifyStateChanged P%d seq=%u\n", idx, new_seq);
 }
 
 JNIEXPORT jint JNICALL
