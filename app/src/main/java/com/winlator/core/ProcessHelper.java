@@ -208,6 +208,9 @@ public abstract class ProcessHelper {
     //                         such as SteamTokenLogin
     public static String execWithOutput(String command, String[] envp, File workingDir, boolean includeStderr) {
         StringBuilder output = new StringBuilder();
+        final StringBuilder stdoutBuf = new StringBuilder();
+        final StringBuilder stderrBuf = new StringBuilder();
+        Thread stdoutDrainer = null;
         Thread stderrDrainer = null;
         try {
             if (BuildConfig.MODERN_ANDROID) command = "/system/bin/linker64 " + command;
@@ -221,45 +224,43 @@ public abstract class ProcessHelper {
                 }
             }
             if (workingDir != null) pb.directory(workingDir);
-            pb.redirectErrorStream(includeStderr); // merge only when caller wants stderr
 
             java.lang.Process process = pb.start();
 
-            // When not merging, drain stderr on a daemon thread to prevent pipe-buffer deadlock.
-            // SteamTokenLogin uses this when calling includeStderr=false
-            if (!includeStderr) {
-                final InputStream stderrStream = process.getErrorStream();
-                stderrDrainer = new Thread(() -> {
-                    try {
-                        byte[] buf = new byte[4096];
-                        while (stderrStream.read(buf) != -1) {
-                            if (Thread.currentThread().isInterrupted())
-                            break;
-                        }
-                    } catch (IOException ignored) {}
-                }, "stderr-drainer");
-                stderrDrainer.setDaemon(true); // won't block app shutdown if something goes wrong
-                stderrDrainer.start();
-            }
+            final InputStream stdoutStream = process.getInputStream();
+            stdoutDrainer = new Thread(() -> {
+                try (BufferedReader r = new BufferedReader(new InputStreamReader(stdoutStream))) {
+                    String l;
+                    while ((l = r.readLine()) != null) stdoutBuf.append(l).append("\n");
+                } catch (IOException ignored) {}
+            }, "stdout-drainer");
+            stdoutDrainer.setDaemon(true);
+            stdoutDrainer.start();
 
-            // Read stdout (or the merged stream) inline; EOF arrives after the process exits.
-            try (BufferedReader r = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String l;
-                while ((l = r.readLine()) != null) output.append(l).append("\n");
-            }
+            final InputStream stderrStream = process.getErrorStream();
+            stderrDrainer = new Thread(() -> {
+                try (BufferedReader r = new BufferedReader(new InputStreamReader(stderrStream))) {
+                    String l;
+                    while ((l = r.readLine()) != null) {
+                        if (includeStderr) stderrBuf.append(l).append("\n");
+                    }
+                } catch (IOException ignored) {}
+            }, "stderr-drainer");
+            stderrDrainer.setDaemon(true);
+            stderrDrainer.start();
 
-            // Process has already exited (we drained its stdout to EOF).
-            // waitFor() reaps the OS process-table entry.
             process.waitFor();
+            try { stdoutStream.close(); } catch (IOException ignored) {}
+            try { stderrStream.close(); } catch (IOException ignored) {}
+            stdoutDrainer.join(5_000);
+            stderrDrainer.join(5_000);
 
-            if (stderrDrainer != null) {
-                stderrDrainer.join(5_000); // bounded wait; daemon thread is reaped on JVM exit anyway
-            }
+            output.append(stdoutBuf);
+            if (includeStderr) output.append(stderrBuf);
         } catch (Exception e) {
             output.append("Error: ").append(e.getMessage());
         }
 
-        // Format output: trim trailing whitespace/newlines
         return output.toString().trim();
     }
 
