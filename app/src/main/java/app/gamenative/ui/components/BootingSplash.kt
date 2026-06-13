@@ -41,6 +41,7 @@ import app.gamenative.ui.theme.BrandGradient
 import app.gamenative.ui.theme.PluviaTheme
 import com.skydoves.landscapist.ImageOptions
 import com.skydoves.landscapist.coil.CoilImage
+import kotlin.math.sin
 import kotlin.random.Random
 import kotlinx.coroutines.delay
 
@@ -98,6 +99,8 @@ fun BootingSplash(
     ) {
         // Animations only run while visible (inside AnimatedVisibility scope)
         val infiniteTransition = rememberInfiniteTransition(label = "bootSplash")
+        val scrimColor = MaterialTheme.colorScheme.scrim
+        var heroImageFailed by remember(heroImageUrl) { mutableStateOf(false) }
 
         val glowAlpha by infiniteTransition.animateFloat(
             initialValue = 0.4f,
@@ -129,11 +132,39 @@ fun BootingSplash(
             label = "shimmer",
         )
 
+        val particlePhase by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(20000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "particlePhase",
+        )
+
+        val useHeroBackdrop = heroImageUrl.isNotEmpty() && !heroImageFailed
+
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
         ) {
-            if (heroImageUrl.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.background,
+                                PluviaTheme.colors.surfacePanel,
+                                MaterialTheme.colorScheme.background,
+                            ),
+                        ),
+                    ),
+            )
+
+            AmbientParticles(phase = particlePhase)
+
+            if (useHeroBackdrop) {
                 CoilImage(
                     modifier = Modifier
                         .fillMaxSize()
@@ -141,54 +172,64 @@ fun BootingSplash(
                             scaleX = 1.06f
                             scaleY = 1.06f
                         }
-                        .blur(3.dp),
+                        .alpha(0.5f)
+                        .blur(7.dp),
                     imageModel = { heroImageUrl },
                     imageOptions = ImageOptions(
                         contentScale = ContentScale.Crop,
                         contentDescription = null,
                     ),
                     loading = {},
-                    failure = {},
+                    failure = {
+                        heroImageFailed = true
+                    },
                     previewPlaceholder = painterResource(R.drawable.ic_logo_color),
                 )
             }
 
-            // Dark overlay — heavier than the carousel to keep text readable
+            if (useHeroBackdrop) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.24f)),
+                )
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = if (heroImageUrl.isNotEmpty()) 0.55f else 0.85f)),
+                    .background(
+                        scrimColor.copy(alpha = if (useHeroBackdrop) 0.42f else 0f),
+                    ),
             )
 
-            // Vertical vignette (mirrors carousel backdrop)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
                         brush = Brush.verticalGradient(
                             colorStops = arrayOf(
-                                0.0f to Color.Black.copy(alpha = 0.74f),
-                                0.16f to Color.Black.copy(alpha = 0.52f),
-                                0.38f to Color.Black.copy(alpha = 0.24f),
-                                0.62f to Color.Black.copy(alpha = 0.34f),
-                                1.0f to Color.Black.copy(alpha = 0.72f),
+                                0.0f to scrimColor.copy(alpha = if (useHeroBackdrop) 0.76f else 0f),
+                                0.16f to scrimColor.copy(alpha = if (useHeroBackdrop) 0.56f else 0f),
+                                0.38f to scrimColor.copy(alpha = if (useHeroBackdrop) 0.26f else 0f),
+                                0.62f to scrimColor.copy(alpha = if (useHeroBackdrop) 0.32f else 0f),
+                                1.0f to scrimColor.copy(alpha = if (useHeroBackdrop) 0.74f else 0f),
                             ),
                         ),
                     ),
             )
 
-            // Horizontal vignette (mirrors carousel backdrop)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
                         brush = Brush.horizontalGradient(
                             colorStops = arrayOf(
-                                0.0f to Color.Black.copy(alpha = 0.34f),
-                                0.14f to Color.Black.copy(alpha = 0.16f),
+                                0.0f to scrimColor.copy(alpha = if (useHeroBackdrop) 0.4f else 0f),
+                                0.14f to scrimColor.copy(alpha = if (useHeroBackdrop) 0.18f else 0f),
                                 0.5f to Color.Transparent,
-                                0.86f to Color.Black.copy(alpha = 0.16f),
-                                1.0f to Color.Black.copy(alpha = 0.34f),
+                                0.86f to scrimColor.copy(alpha = if (useHeroBackdrop) 0.18f else 0f),
+                                1.0f to scrimColor.copy(alpha = if (useHeroBackdrop) 0.4f else 0f),
                             ),
                         ),
                     ),
@@ -258,12 +299,16 @@ fun BootingSplash(
                         fontWeight = FontWeight.Medium,
                         letterSpacing = 1.sp,
                         shadow = Shadow(
-                            color = Color.Black.copy(alpha = 0.8f),
+                            color = scrimColor.copy(alpha = if (useHeroBackdrop) 0.9f else 0f),
                             offset = Offset(0f, 1f),
                             blurRadius = 6f,
                         ),
                     ),
-                    color = Color.White.copy(alpha = 0.7f),
+                    color = if (useHeroBackdrop) {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
+                    } else {
+                        Color.White.copy(alpha = 0.7f)
+                    },
                     textAlign = TextAlign.Center,
                 )
 
@@ -287,12 +332,16 @@ fun BootingSplash(
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     lineHeight = 20.sp,
                                     shadow = Shadow(
-                                        color = Color.Black.copy(alpha = 0.8f),
+                                        color = scrimColor.copy(alpha = if (useHeroBackdrop) 0.9f else 0f),
                                         offset = Offset(0f, 1f),
                                         blurRadius = 6f,
                                     ),
                                 ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (useHeroBackdrop) {
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.76f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -305,6 +354,54 @@ fun BootingSplash(
         }
     }
 }
+
+@Composable
+private fun AmbientParticles(
+    phase: Float,
+    modifier: Modifier = Modifier,
+) {
+    val particleColor = PluviaTheme.colors.accentCyan
+
+    val particles = remember {
+        List(12) {
+            ParticleData(
+                baseX = Random.nextFloat(),
+                baseY = Random.nextFloat(),
+                size = Random.nextFloat() * 3f + 1f,
+                speed = Random.nextFloat() * 0.5f + 0.5f,
+                phaseOffset = Random.nextFloat() * 360f,
+            )
+        }
+    }
+
+    Canvas(modifier = modifier.fillMaxSize()) {
+        particles.forEach { particle ->
+            val animatedPhase = (phase + particle.phaseOffset) * particle.speed
+            val radians = Math.toRadians(animatedPhase.toDouble())
+
+            val offsetX = (sin(radians) * 30).toFloat()
+            val offsetY = (sin(radians * 0.7) * 20).toFloat()
+
+            val x = particle.baseX * size.width + offsetX
+            val y = particle.baseY * size.height + offsetY
+            val alpha = (0.15f + 0.15f * sin(radians * 2).toFloat()).coerceIn(0f, 0.3f)
+
+            drawCircle(
+                color = particleColor.copy(alpha = alpha),
+                radius = particle.size.dp.toPx(),
+                center = Offset(x, y),
+            )
+        }
+    }
+}
+
+private data class ParticleData(
+    val baseX: Float,
+    val baseY: Float,
+    val size: Float,
+    val speed: Float,
+    val phaseOffset: Float,
+)
 
 @Composable
 private fun ProgressBar(
