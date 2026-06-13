@@ -456,32 +456,34 @@ class MainViewModel @Inject constructor(
     fun launchApp(context: Context, appId: String) {
         // Show booting splash before launching the app
         viewModelScope.launch {
-            // Resolve hero image URL for the booting splash background
-            val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
-            val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
-            val heroUrl = when (gameSource) {
-                GameSource.STEAM -> {
-                    val steamApp = SteamService.getAppInfoOf(gameId)
-                    steamApp?.getHeroUrl()?.ifEmpty { steamApp.headerUrl } ?: ""
-                }
-                GameSource.GOG -> {
-                    val game = GOGService.getGOGGameOf(gameId.toString())
-                    game?.backgroundUrl?.ifEmpty { game.imageUrl } ?: ""
-                }
-                GameSource.EPIC -> {
-                    val game = EpicService.getEpicGameOf(gameId)
-                    game?.artPortrait?.ifEmpty { game.artCover.ifEmpty { game.artSquare } } ?: ""
-                }
-                GameSource.AMAZON -> {
-                    val game = AmazonService.getAmazonGameByAppId(gameId)
-                    game?.heroUrl?.ifEmpty { game.artUrl } ?: ""
-                }
-                GameSource.CUSTOM_GAME -> {
-                    val folderPath = CustomGameScanner.getFolderPathFromAppId(appId)
-                    if (folderPath != null) {
+            setShowBootingSplash(true)
+            PluviaApp.events.emit(AndroidEvent.SetAllowedOrientation(PrefManager.allowedOrientation))
+
+            val heroUrl = withContext(Dispatchers.IO) {
+                val gameSource = ContainerUtils.extractGameSourceFromContainerId(appId)
+                val gameId = ContainerUtils.extractGameIdFromContainerId(appId)
+                when (gameSource) {
+                    GameSource.STEAM -> {
+                        val steamApp = SteamService.getAppInfoOf(gameId)
+                        steamApp?.getHeroUrl()?.ifEmpty { steamApp.headerUrl } ?: ""
+                    }
+                    GameSource.GOG -> {
+                        val game = GOGService.getGOGGameOf(gameId.toString())
+                        game?.backgroundUrl?.ifEmpty { game.imageUrl } ?: ""
+                    }
+                    GameSource.EPIC -> {
+                        val game = EpicService.getEpicGameOf(gameId)
+                        game?.artPortrait?.ifEmpty { game.artCover.ifEmpty { game.artSquare } } ?: ""
+                    }
+                    GameSource.AMAZON -> {
+                        val game = AmazonService.getAmazonGameByAppId(gameId)
+                        game?.heroUrl?.ifEmpty { game.artUrl } ?: ""
+                    }
+                    GameSource.CUSTOM_GAME -> {
+                        val folderPath = CustomGameScanner.getFolderPathFromAppId(appId) ?: return@withContext ""
                         val folder = java.io.File(folderPath)
                         val heroFile = folder.listFiles()?.firstOrNull { file ->
-                            file.isFile && 
+                            file.isFile &&
                                 file.name.startsWith("steamgriddb_hero", ignoreCase = true) &&
                                 !file.name.contains("grid_", ignoreCase = true) &&
                                 (file.name.endsWith(".png", ignoreCase = true) ||
@@ -489,12 +491,10 @@ class MainViewModel @Inject constructor(
                                     file.name.endsWith(".webp", ignoreCase = true))
                         }
                         heroFile?.let { android.net.Uri.fromFile(it).toString() } ?: ""
-                    } else ""
+                    }
                 }
             }
             setBootingSplashHeroImageUrl(heroUrl)
-            setShowBootingSplash(true)
-            PluviaApp.events.emit(AndroidEvent.SetAllowedOrientation(PrefManager.allowedOrientation))
 
             val apiJob = viewModelScope.async(Dispatchers.IO) {
                 val container = ContainerUtils.getOrCreateContainer(context, appId)
