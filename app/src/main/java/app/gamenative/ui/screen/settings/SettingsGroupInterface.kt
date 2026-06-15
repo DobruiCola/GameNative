@@ -419,6 +419,23 @@ fun SettingsGroupInterface(
         }
     }
 
+    // Custom Game Settings
+    SettingsGroup(
+        modifier = Modifier.background(Color.Transparent),
+        title = { Text(text = stringResource(R.string.settings_interface_custom_games)) },
+    ) {
+        var importCustomGameAsSteamGame by rememberSaveable { mutableStateOf(PrefManager.importCustomGameAsSteamGame) }
+        SettingsSwitch(
+            colors = settingsTileColorsAlt(),
+            title = { Text(text = stringResource(R.string.settings_interface_custom_game_import_as_steam)) },
+            state = importCustomGameAsSteamGame,
+            onCheckedChange = {
+                importCustomGameAsSteamGame = it
+                PrefManager.importCustomGameAsSteamGame = it
+            },
+        )
+    }
+
     // Platform integrations now live in the System Menu. The detailed
     // integration tiles and logout flows have been removed from Settings
     // to avoid duplication.
