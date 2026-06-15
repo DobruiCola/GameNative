@@ -20,6 +20,8 @@ import android.hardware.display.DisplayManager
 import android.hardware.input.InputManager
 import android.view.InputDevice
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import app.gamenative.BuildConfig
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -100,14 +102,19 @@ import app.gamenative.ui.data.PerformanceHudConfig
 import app.gamenative.ui.data.PerformanceHudSize
 import app.gamenative.ui.data.XServerState
 import app.gamenative.ui.widget.PerformanceHudView
+import app.gamenative.utils.AssetUtils
 import app.gamenative.utils.ContainerUtils
+import app.gamenative.utils.downloader.CoreDriverDownloader
 import app.gamenative.utils.CustomGameScanner
 import app.gamenative.utils.ExecutableSelectionUtils
 import app.gamenative.utils.LsfgQuickMenuHelper
 import app.gamenative.utils.ManifestComponentHelper
+import app.gamenative.utils.downloader.DXWrapperDownloader
+import app.gamenative.utils.downloader.GraphicsDriverDownloader
 import app.gamenative.utils.PreInstallSteps
 import app.gamenative.utils.SteamTokenLogin
 import app.gamenative.utils.SteamUtils
+import app.gamenative.utils.downloader.WinComponentDownloader
 import app.gamenative.utils.WineProcessSnapshotHelper
 import com.posthog.PostHog
 import com.winlator.alsaserver.ALSAClient
@@ -143,7 +150,11 @@ import com.winlator.inputcontrols.TouchMouse
 import com.winlator.widget.FrameRating
 import com.winlator.widget.InputControlsView
 import com.winlator.widget.TouchpadView
+import com.winlator.renderer.GLRenderer
+import com.winlator.renderer.VulkanRenderer
+import com.winlator.widget.XServerRendererView
 import com.winlator.widget.XServerView
+import com.winlator.widget.XServerViewGL
 import com.winlator.winhandler.WinHandler
 import com.winlator.winhandler.WinHandler.PreferredInputApi
 import com.winlator.winhandler.OnGetProcessInfoListener
@@ -241,7 +252,7 @@ private fun detectMaxRefreshRateHz(context: Context, attachedView: View?): Int {
 }
 
 private data class XServerViewReleaseBinding(
-    val xServerView: XServerView,
+    val xServerView: XServerRendererView,
     val windowModificationListener: WindowManager.OnWindowModificationListener,
 )
 
@@ -295,6 +306,7 @@ fun XServerScreen(
     appId: String,
     bootToContainer: Boolean,
     testGraphics: Boolean = false,
+    isOffline: Boolean = false,
     registerBackAction: ( ( ) -> Unit ) -> Unit,
     navigateBack: () -> Unit,
     onExit: (onComplete: (() -> Unit)?) -> Unit,
@@ -385,8 +397,8 @@ fun XServerScreen(
 
     var currentAppInfo = SteamService.getAppInfoOf(gameId)
 
-    var xServerView: XServerView? by remember {
-        val result = mutableStateOf<XServerView?>(null)
+    var xServerView: XServerRendererView? by remember {
+        val result = mutableStateOf<XServerRendererView?>(null)
         Timber.i("Remembering xServerView as $result")
         result
     }
@@ -397,6 +409,7 @@ fun XServerScreen(
     var win32AppWorkarounds: Win32AppWorkarounds? by remember { mutableStateOf(null) }
     var physicalControllerHandler: PhysicalControllerHandler? by remember { mutableStateOf(null) }
     var exitWatchJob: Job? by remember { mutableStateOf(null) }
+    val keyboardEscMenuHandler = remember(scope) { KeyboardEscMenuHandler(scope) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -404,6 +417,7 @@ fun XServerScreen(
             physicalControllerHandler = null
             exitWatchJob?.cancel()
             exitWatchJob = null
+            keyboardEscMenuHandler.cancel()
         }
     }
     var isKeyboardVisible = false
@@ -418,15 +432,24 @@ fun XServerScreen(
     var elementToEdit by remember { mutableStateOf<com.winlator.inputcontrols.ControlElement?>(null) }
     var showPhysicalControllerDialog by remember { mutableStateOf(false) }
     var showPlayingBlockedDialog by rememberSaveable { mutableStateOf(false) }
+    var playingBlockedRemoteName by rememberSaveable { mutableStateOf<String?>(null) }
     var showTouchGestureDialog by remember { mutableStateOf(false) }
     var isTouchscreenModeActive by remember { mutableStateOf(container.isTouchscreenMode) }
     var currentGestureConfig by remember {
         mutableStateOf(app.gamenative.data.TouchGestureConfig.fromJson(container.getGestureConfig()))
     }
+    fun shouldShowMouseCursor(): Boolean {
+        return !container.isDisableMouseInput &&
+            (!container.isTouchscreenMode || currentGestureConfig.showCursorInTouchscreenMode)
+    }
+    fun applyMouseCursorVisibility() {
+        xServerView?.renderer?.setCursorVisible(shouldShowMouseCursor())
+    }
     val clickHighlightPoints = remember { mutableStateListOf<app.gamenative.ui.component.HighlightPoint>() }
     var debugGestureName by remember { mutableStateOf("") }
     var debugGestureKey by remember { mutableIntStateOf(0) }
     var keyboardRequestedFromOverlay by remember { mutableStateOf(false) }
+    var shouldForceResumeOnMenuClose by remember { mutableStateOf(false) }
     var showQuickMenu by remember { mutableStateOf(false) }
     var quickMenuToolsVisible by remember { mutableStateOf(false) }
     var quickMenuWineProcesses by remember { mutableStateOf<List<ProcessInfo>>(emptyList()) }
@@ -435,6 +458,7 @@ fun XServerScreen(
     var keepPausedForEditor by remember { mutableStateOf(false) }
     var hasPhysicalKeyboard by remember { mutableStateOf(false) }
     var hasPhysicalMouse by remember { mutableStateOf(false) }
+    var usingScreenMirror by remember { mutableStateOf(false) }
     var hasInternalTouchpad by remember { mutableStateOf(false) }
     var hasUpdatedScreenGamepad by remember { mutableStateOf(false) }
     var isPerformanceHudEnabled by remember { mutableStateOf(PrefManager.showFps) }
@@ -518,8 +542,10 @@ fun XServerScreen(
     }
 
     LaunchedEffect(xServerView?.renderer) {
-        xServerView?.renderer?.let { renderer ->
-            applyScreenEffectsConfig(renderer, loadScreenEffectsConfig(container))
+        val screenEffectsConfig = loadScreenEffectsConfig(container)
+        when (val renderer = xServerView?.renderer) {
+            is VulkanRenderer -> applyScreenEffectsConfig(renderer, screenEffectsConfig)
+            is GLRenderer -> applyScreenEffectsConfig(renderer, screenEffectsConfig)
         }
     }
 
@@ -574,7 +600,7 @@ fun XServerScreen(
     }
 
     LaunchedEffect(xServerView) {
-        val detectedMax = detectMaxRefreshRateHz(context, xServerView)
+        val detectedMax = detectMaxRefreshRateHz(context, xServerView as? View)
         detectedMaxRefreshRateHz = detectedMax
         val clampedTarget = fpsLimiterTarget.coerceAtMost(detectedMax).coerceAtLeast(5)
         if (clampedTarget != fpsLimiterTarget) {
@@ -800,10 +826,7 @@ fun XServerScreen(
     }
 
     val tryCapturePointer: () -> Boolean = {
-        // Only recapture when we have a physical mouse plugged in (or internal touchpad),
-        // no menus are open and we're not in Touchscreen mode
-        if ((hasPhysicalMouse || hasInternalTouchpad) &&
-            !showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
+        if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
             !container.isTouchscreenMode) {
             PluviaApp.touchpadView?.postDelayed({
                 val view = PluviaApp.touchpadView
@@ -836,7 +859,8 @@ fun XServerScreen(
         controllerManager.scanForDevices()
         hasPhysicalController = controllerManager.getDetectedDevices().isNotEmpty()
 
-        if (!hasInternalTouchpad && !hasPhysicalMouse && !hasPhysicalKeyboard && !hasPhysicalController &&
+        if (!usingScreenMirror &&
+            !hasInternalTouchpad && !hasPhysicalMouse && !hasPhysicalKeyboard && !hasPhysicalController &&
             !container.isTouchscreenMode) {
             val manager = PluviaApp.inputControlsManager
             val profiles = manager?.getProfiles(false) ?: listOf()
@@ -904,6 +928,7 @@ fun XServerScreen(
         }
         val isGamepad = ExternalController.isGameController(device)
         if (isGamepad) {
+            xServerView!!.getxServer().winHandler.setCurrentController(device.id);
             if (!showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode &&
                 !container.isTouchscreenMode &&
                 !hasUpdatedScreenGamepad) {
@@ -919,15 +944,8 @@ fun XServerScreen(
         if (!keyboardRequestedFromOverlay) {
             imeInputReceiver?.hideKeyboard()
         }
-        val resumeImmediatelyForKeyboard = keyboardRequestedFromOverlay && manualResumeMode
+        shouldForceResumeOnMenuClose = keyboardRequestedFromOverlay && manualResumeMode && !keepPausedForEditor
         keyboardRequestedFromOverlay = false
-        if (!keepPausedForEditor) {
-            if (resumeImmediatelyForKeyboard) {
-                forceResumeIfSuspended()
-            } else {
-                resumeIfAllowedAfterOverlay()
-            }
-        }
         showQuickMenu = false
     }
 
@@ -1012,10 +1030,10 @@ fun XServerScreen(
                 container.setDisableMouseInput(newValue)
                 container.saveData()
                 PluviaApp.touchpadView?.setTouchscreenMouseDisabled(newValue)
-                if (!newValue && !container.isTouchscreenMode) {
-                    xServerView?.renderer?.setCursorVisible(true)
-                } else if (newValue) {
+                if (newValue) {
                     xServerView?.renderer?.setCursorVisible(false)
+                } else {
+                    applyMouseCursorVisibility()
                 }
                 true
             }
@@ -1115,13 +1133,9 @@ fun XServerScreen(
                         areControlsVisible = false
                     }
 
-                    // Hide cursor in touchscreen mode
-                    xServerView?.renderer?.setCursorVisible(false)
+                    applyMouseCursorVisibility()
                 } else {
-                    // Restore cursor if mouse input is allowed
-                    if (!container.isDisableMouseInput) {
-                        xServerView?.renderer?.setCursorVisible(true)
-                    }
+                    applyMouseCursorVisibility()
 
                     // Re-evaluate whether to show on-screen controls
                     // (same logic as scanForExternalDevices startup path)
@@ -1210,10 +1224,6 @@ fun XServerScreen(
 
         Timber.i("BackHandler")
 
-        // Suspend game and audio while the navigation overlay is visible.
-        pauseForOverlayIfAllowed()
-        keyboardRequestedFromOverlay = false
-
         val controllerManager = ControllerManager.getInstance()
         controllerManager.scanForDevices()
         hasPhysicalController = controllerManager.getDetectedDevices().isNotEmpty()
@@ -1259,6 +1269,13 @@ fun XServerScreen(
         }
     }
 
+    // Modern only: API 33+ routes gesture-back through OnBackInvokedDispatcher,
+    // which no longer delivers KEYCODE_BACK to MainActivity.dispatchKeyEvent.
+    // BackHandler registers with OnBackPressedDispatcher to catch that path.
+    // Legacy flavor (targetSdk 28) still receives BACK as a KeyEvent, so it keeps
+    // master's event-bus route via registerBackAction(gameBack) below.
+    BackHandler(enabled = BuildConfig.MODERN_ANDROID) { gameBack() }
+
     DisposableEffect(container) {
         registerBackAction(gameBack)
         onDispose {
@@ -1283,6 +1300,7 @@ fun XServerScreen(
         }
         val onKeyEvent: (AndroidEvent.KeyEvent) -> Boolean = {
             val isKeyboard = Keyboard.isKeyboardDevice(it.event.device)
+            val isPhysicalKeyboard = isKeyboard && it.event.device?.isVirtual != true
             val isGamepad = ExternalController.isGameController(it.event.device)
             val waitingForManualResume =
                 manualResumeMode &&
@@ -1304,11 +1322,20 @@ fun XServerScreen(
                     else -> false
                 }
             } else if ((showElementEditor || keepPausedForEditor || showQuickMenu || isEditMode) && (isGamepad || isKeyboard)) {
-                val escPressed = isKeyboard && !keepPausedForEditor && it.event.keyCode == KeyEvent.KEYCODE_ESCAPE &&
-                        it.event.action == KeyEvent.ACTION_DOWN &&
-                        it.event.repeatCount == 0
-                if (escPressed) {
-                    (context as? ComponentActivity)?.onBackPressedDispatcher?.onBackPressed()
+                val escOrBackPressed = !keepPausedForEditor &&
+                    (
+                        isKeyboard && it.event.keyCode == KeyEvent.KEYCODE_ESCAPE ||
+                            isPhysicalKeyboard && it.event.keyCode == KeyEvent.KEYCODE_BACK
+                        )
+                if (escOrBackPressed) {
+                    keyboardEscMenuHandler.handleOverlayEscOrBack(it.event, keyboard)
+                    if (it.event.action == KeyEvent.ACTION_DOWN && it.event.repeatCount == 0) {
+                        if (BuildConfig.MODERN_ANDROID) {
+                            (context as? ComponentActivity)?.onBackPressedDispatcher?.onBackPressed()
+                        } else {
+                            gameBack()
+                        }
+                    }
                     true
                 } else {
                     // Let Compose focus system handle keyboard and gamepad navigation/selection while menu is visible.
@@ -1317,6 +1344,7 @@ fun XServerScreen(
             } else {
                 var handled = false
                 if (isGamepad) {
+                    xServerView!!.getxServer().winHandler.setCurrentController(it.event.device.id);
                     handled = physicalControllerHandler?.onKeyEvent(it.event) == true
                     if (!handled) handled = PluviaApp.inputControlsView?.onKeyEvent(it.event) == true
                     // Final fallback to WinHandler passthrough
@@ -1324,13 +1352,22 @@ fun XServerScreen(
                 }
                 if (!handled && isKeyboard) {
                     val isShiftEscPressed = it.event.keyCode == KeyEvent.KEYCODE_ESCAPE &&
-                            it.event.isShiftPressed &&
-                            it.event.action == KeyEvent.ACTION_DOWN &&
-                            it.event.repeatCount == 0
+                        it.event.isShiftPressed &&
+                        it.event.action == KeyEvent.ACTION_DOWN &&
+                        it.event.repeatCount == 0
                     if (isShiftEscPressed &&
                         !showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode) {
+                        keyboardEscMenuHandler.cancel()
                         gameBack()
                         handled = true
+                    } else if (isPhysicalKeyboard && keyboardEscMenuHandler.isEscOrBack(it.event) &&
+                        !showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode) {
+                        handled = keyboardEscMenuHandler.handleGameEscOrBack(
+                            event = it.event,
+                            keyboard = keyboard,
+                            canOpenMenu = { !showElementEditor && !keepPausedForEditor && !showQuickMenu && !isEditMode },
+                            openMenu = gameBack,
+                        )
                     } else {
                         if (it.event.device?.isVirtual == true) {
                             handled = keyboard?.onVirtualKeyEvent(it.event) == true
@@ -1351,6 +1388,7 @@ fun XServerScreen(
             } else {
                 var handled = false
                 if (isGamepad && it.event != null) {
+                    xServerView!!.getxServer().winHandler.setCurrentController(it.event.device.id);
                     handled = physicalControllerHandler?.onGenericMotionEvent(it.event!!) == true
                     if (!handled) handled = PluviaApp.inputControlsView?.onGenericMotionEvent(it.event) == true
                     // Final fallback to WinHandler passthrough
@@ -1374,6 +1412,11 @@ fun XServerScreen(
                         tryCapturePointer()
                     }
                 }
+                val event = it.event
+                val device = event?.device
+                if (!usingScreenMirror && device?.name == "scrcpy") {
+                    usingScreenMirror = true
+                }
                 handled
             }
         }
@@ -1385,9 +1428,14 @@ fun XServerScreen(
             Timber.i("onForceCloseApp")
             exit(xServerView!!.getxServer().winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
         }
-        val onPlayingBlocked: (SteamEvent.PlayingBlocked) -> Unit = {
-            Timber.i("onPlayingBlocked")
-            showPlayingBlockedDialog = true
+        val onPlayingBlocked: (SteamEvent.PlayingBlocked) -> Unit = { event ->
+            if (isOffline || container.isSteamOfflineMode()) {
+                Timber.i("onPlayingBlocked suppressed (offline=$isOffline, containerOffline=${container.isSteamOfflineMode()})")
+            } else {
+                Timber.i("onPlayingBlocked remoteAppName=${event.remoteAppName}")
+                playingBlockedRemoteName = event.remoteAppName
+                showPlayingBlockedDialog = true
+            }
         }
         val debugCallback = Callback<String> { outputLine ->
             Timber.i(outputLine ?: "")
@@ -1414,11 +1462,12 @@ fun XServerScreen(
 
     DisposableEffect(lifecycleOwner, xServerView) {
         val currentXServerView = xServerView
-        if (currentXServerView == null) {
+        val currentXServerViewAsView = currentXServerView as? View
+        if (currentXServerView == null || currentXServerViewAsView == null) {
             onDispose { }
         } else {
             fun syncRendererToCurrentLifecycleState() {
-                if (!currentXServerView.isAttachedToWindow) return
+                if (!currentXServerViewAsView.isAttachedToWindow) return
 
                 when {
                     lifecycleOwner.lifecycle.currentState == Lifecycle.State.DESTROYED -> Unit
@@ -1452,12 +1501,43 @@ fun XServerScreen(
             }
 
             lifecycleOwner.lifecycle.addObserver(observer)
-            currentXServerView.addOnAttachStateChangeListener(attachStateListener)
+            currentXServerViewAsView.addOnAttachStateChangeListener(attachStateListener)
             syncRendererToCurrentLifecycleState()
             onDispose {
-                currentXServerView.removeOnAttachStateChangeListener(attachStateListener)
+                currentXServerViewAsView.removeOnAttachStateChangeListener(attachStateListener)
                 lifecycleOwner.lifecycle.removeObserver(observer)
             }
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, performanceHudView) {
+        val hud = performanceHudView
+        if (hud != null) {
+            if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                hud.resume()
+            } else {
+                hud.pause()
+            }
+
+            val observer = LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_PAUSE -> {
+                        Timber.d("Pausing PerformanceHudView for lifecycle event: $event")
+                        hud.pause()
+                    }
+                    Lifecycle.Event.ON_RESUME -> {
+                        Timber.d("Resuming PerformanceHudView for lifecycle event: $event")
+                        hud.resume()
+                    }
+                    else -> Unit
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+            }
+        } else {
+            onDispose { }
         }
     }
 
@@ -1591,13 +1671,30 @@ fun XServerScreen(
                     ?.getComponent<XServerComponent>(XServerComponent::class.java)
                     ?.xServer
             val xServerToUse = existingXServer ?: XServer(ScreenInfo(xServerState.value.screenSize), usrGlibc)
-            val xServerView = XServerView(
-                context,
-                xServerToUse,
-            ).apply {
+            // VirGL containers always need GL (shared EGL context for the
+            // VirGL passthrough). Default to the legacy GL renderer for all
+            // other containers as well. Uncheck the per-container useLegacyRenderer
+            // setting to switch to the Vulkan renderer.
+            val useGLRenderer = container.graphicsDriver == "virgl" || container.isUseLegacyRenderer
+            val xServerViewInstance: XServerRendererView = if (useGLRenderer) {
+                XServerViewGL(context, xServerToUse)
+            } else {
+                XServerView(context, xServerToUse)
+            }
+            val xServerView = xServerViewInstance.apply {
                 xServerView = this
                 setFrameRateLimit(if (fpsLimiterEnabled) fpsLimiterTarget else 0)
                 val renderer = this.renderer
+                if (!useGLRenderer && renderer is VulkanRenderer) {
+                    val pm = container.rendererPresentMode.ifEmpty { "fifo" }
+                    val vkMode = when (pm.lowercase(Locale.getDefault())) {
+                        "mailbox" -> 1
+                        "immediate" -> 0
+                        "relaxed" -> 3
+                        else -> 2
+                    }
+                    renderer.setVkPresentMode(vkMode)
+                }
                 renderer.setCursorVisible(false)
                 renderer.setOnFrameRenderedListener {
                     if (shouldTrackDisplayedFrames.get()) {
@@ -1685,6 +1782,10 @@ fun XServerScreen(
                     if (container.executablePath.isNotBlank()) {
                         renderer.forceFullscreenWMClass = Paths.get(container.executablePath).name
                     }
+                    // Here, Ludashi calls setDriverInfo to use Adrenotools for the compositor
+                    // We are not doing that because it caused a race and crash in some games (eg Balatro)
+                    // Unless booted from the container - and I didn't know the benefit of custom driver
+                    // on the compositor. I may be wrong though.
                 }
                 // Remove any previous listener before adding a new one (handles key(isPortrait) recreation)
                 windowModificationListener?.let {
@@ -1743,7 +1844,7 @@ fun XServerScreen(
 
                         override fun onUpdateWindowContent(window: Window) {
                             if (!xServerState.value.winStarted && window.isApplicationWindow()) {
-                                if (!container.isDisableMouseInput && !container.isTouchscreenMode) renderer?.setCursorVisible(true)
+                                if (shouldShowMouseCursor()) renderer?.setCursorVisible(true)
                                 xServerState.value.winStarted = true
                             }
                             if (frameRatingWindowId == -1 && window.isApplicationWindow()) {
@@ -1893,29 +1994,35 @@ fun XServerScreen(
                             Timber.i("Doing things once")
                             val envVars = EnvVars()
 
-                            setupWineSystemFiles(
-                                context,
-                                firstTimeBoot,
-                                xServerView!!.getxServer().screenInfo,
-                                xServerState,
-                                container,
-                                containerManager,
-                                envVars,
-                                contentsManager,
-                                onExtractFileListener,
-                            )
+                            runBlocking {
+                                setupWineSystemFiles(
+                                    context,
+                                    firstTimeBoot,
+                                    xServerView!!.getxServer().screenInfo,
+                                    xServerState,
+                                    container,
+                                    containerManager,
+                                    envVars,
+                                    contentsManager,
+                                    onExtractFileListener,
+                                )
+                            }
                             extractArm64ecInputDLLs(context, container) // REQUIRED: Uses updated xinput1_3 main.c from x86_64 build, prevents crashes with 3+ players, avoids need for input shim dlls.
                             extractx86_64InputDlls(context, container)
-                            extractGraphicsDriverFiles(
-                                context,
-                                xServerState.value.graphicsDriver,
-                                xServerState.value.dxwrapper,
-                                xServerState.value.dxwrapperConfig!!,
-                                container,
-                                envVars,
-                                firstTimeBoot,
-                                vkbasaltConfig,
-                            )
+
+                            runBlocking {
+                                extractGraphicsDriverFiles(
+                                    context,
+                                    xServerState.value.graphicsDriver,
+                                    xServerState.value.dxwrapper,
+                                    xServerState.value.dxwrapperConfig!!,
+                                    container,
+                                    envVars,
+                                    firstTimeBoot,
+                                    vkbasaltConfig,
+                                )
+                            }
+
                             changeWineAudioDriver(xServerState.value.audioDriver, container, ImageFs.find(context))
                             setImagefsContainerVariant(context, container)
                             PluviaApp.xEnvironment = setupXEnvironment(
@@ -1930,7 +2037,7 @@ fun XServerScreen(
                                 xServerView!!.getxServer(),
                                 containerVariantChanged,
                                 onGameLaunchError,
-                                navigateBack,
+                                isOffline
                             )
                             if (!PluviaApp.isActivityInForeground && !neverSuspend) {
                                 PluviaApp.xEnvironment?.onPause()
@@ -1967,7 +2074,7 @@ fun XServerScreen(
                 )
             }
             frameLayout.addView(gameHost)
-            gameHost.addView(xServerView)
+            gameHost.addView(xServerView as View)
 
             PluviaApp.inputControlsManager = InputControlsManager(context)
 
@@ -2086,7 +2193,7 @@ fun XServerScreen(
                     val surfaceBg = ContextCompat.getColor(context, R.color.external_display_surface_background)
                     ExternalDisplaySwapController(
                         context = context,
-                        xServerViewProvider = { xServerView },
+                        xServerViewProvider = { xServerView as? View },
                         internalGameHostProvider = { gameHost },
                         onGameOnExternalChanged = { gameOnExternal ->
                             if (gameOnExternal) {
@@ -2363,7 +2470,8 @@ fun XServerScreen(
             isVisible = showQuickMenu,
             onDismiss = dismissOverlayMenu,
             onItemSelected = onQuickMenuItemSelected,
-            renderer = xServerView?.renderer,
+            renderer = xServerView?.renderer as? VulkanRenderer,
+            glRenderer = xServerView?.renderer as? GLRenderer,
             container = container,
             wineProcesses = quickMenuWineProcesses,
             isWineProcessesLoading = quickMenuWineProcessesLoading,
@@ -2403,6 +2511,18 @@ fun XServerScreen(
             onLsfgMultiplierChanged = ::applyLsfgMultiplier,
             onLsfgFlowScaleChanged = ::applyLsfgFlowScale,
             onLsfgPerformanceModeChanged = ::applyLsfgPerformanceMode,
+            onAnimationComplete = { isMenuVisible ->
+                if (isMenuVisible) {
+                    pauseForOverlayIfAllowed()
+                } else {
+                    if (shouldForceResumeOnMenuClose) {
+                        forceResumeIfSuspended()
+                        shouldForceResumeOnMenuClose = false
+                    } else if (!keepPausedForEditor) {
+                        resumeIfAllowedAfterOverlay()
+                    }
+                }
+            },
         )
 
         if (manualResumeMode && PluviaApp.isOverlayPaused && !showQuickMenu && !keepPausedForEditor) {
@@ -2463,19 +2583,22 @@ fun XServerScreen(
                 container.setGestureConfig(newConfig.toJson())
                 container.saveData()
                 PluviaApp.touchpadView?.setGestureConfig(newConfig)
+                applyMouseCursorVisibility()
                 showTouchGestureDialog = false
             },
         )
     }
 
     if (showPlayingBlockedDialog) {
+        val remoteName = playingBlockedRemoteName ?: stringResource(R.string.main_app_running_unknown_game)
         androidx.compose.material3.AlertDialog(
             onDismissRequest = {},
             title = { Text(text = stringResource(R.string.main_app_running_title)) },
-            text = { Text(text = stringResource(R.string.main_app_running_message, context.getString(R.string.main_app_running_unknown_game))) },
+            text = { Text(text = stringResource(R.string.main_app_running_message, remoteName)) },
             confirmButton = {
                 TextButton(onClick = {
                     showPlayingBlockedDialog = false
+                    playingBlockedRemoteName = null
                     SteamService.clearPlayingConflict()
                     scope.launch {
                         SteamService.kickPlayingSession(onlyGame = true)
@@ -2487,6 +2610,7 @@ fun XServerScreen(
             dismissButton = {
                 TextButton(onClick = {
                     showPlayingBlockedDialog = false
+                    playingBlockedRemoteName = null
                     exit(xServerView?.getxServer()?.winHandler, frameRating, currentAppInfo, container, appId, onExit, navigateBack)
                 }) {
                     Text(text = stringResource(R.string.cancel))
@@ -2942,16 +3066,13 @@ private fun setupXEnvironment(
     bootToContainer: Boolean,
     testGraphics: Boolean,
     xServerState: MutableState<XServerState>,
-    // xServerViewModel: XServerViewModel,
     envVars: EnvVars,
-    // generateWinePrefix: Boolean,
     container: Container?,
     appLaunchInfo: LaunchInfo?,
-    // shortcut: Shortcut?,
     xServer: XServer,
     containerVariantChanged: Boolean,
     onGameLaunchError: ((String) -> Unit)? = null,
-    navigateBack: () -> Unit,
+    offline: Boolean = false
 ): XEnvironment {
     ProcessHelper.hardKillStaleWineProcesses()
 
@@ -3071,7 +3192,7 @@ private fun setupXEnvironment(
             }
         }
         gameExecutable = "wine explorer /desktop=shell," + xServer.screenInfo + " " +
-            getWineStartCommand(context, appId, container, bootToContainer, testGraphics, appLaunchInfo, envVars, guestProgramLauncherComponent, gameSource) +
+            getWineStartCommand(context, appId, container, bootToContainer, testGraphics, appLaunchInfo, envVars, guestProgramLauncherComponent, gameSource, offline) +
             (if (container.execArgs.isNotEmpty()) " " + container.execArgs else "")
         preInstallCommands = PreInstallSteps.getPreInstallCommands(
             container,
@@ -3169,7 +3290,10 @@ private fun setupXEnvironment(
         environment.addComponent(ALSAServerComponent(UnixSocketConfig.createSocket(imageFs.getRootDir().getPath(), UnixSocketConfig.ALSA_SERVER_PATH), options))
     } else if (xServerState.value.audioDriver == "pulseaudio") {
         envVars.put("PULSE_SERVER", imageFs.getRootDir().getPath() + UnixSocketConfig.PULSE_SERVER_PATH)
-        environment.addComponent(PulseAudioComponent(UnixSocketConfig.createSocket(imageFs.getRootDir().getPath(), UnixSocketConfig.PULSE_SERVER_PATH)))
+        environment.addComponent(PulseAudioComponent(
+            UnixSocketConfig.createSocket(imageFs.getRootDir().getPath(), UnixSocketConfig.PULSE_SERVER_PATH),
+            container.pulseaudioLowLatency
+        ))
     }
 
     if (xServerState.value.graphicsDriver == "virgl") {
@@ -3364,6 +3488,7 @@ private fun getWineStartCommand(
     envVars: EnvVars,
     guestProgramLauncherComponent: GuestProgramLauncherComponent,
     gameSource: GameSource,
+    offline: Boolean
 ): String {
     val tempDir = File(container.getRootDir(), ".wine/drive_c/windows/temp")
     FileUtils.clear(tempDir)
@@ -3462,7 +3587,8 @@ private fun getWineStartCommand(
         // Get Epic launch parameters
         Timber.tag("XServerScreen").d("Building Epic launch parameters for ${game.appName}...")
         val runArguments: List<String> = runBlocking {
-            val result = EpicService.buildLaunchParameters(context, container, game, false)
+            val offlineLaunch = offline || container.isEpicOfflineMode;
+            val result = EpicService.buildLaunchParameters(context, container, game, offlineLaunch)
             if (result.isFailure) {
                 Timber.tag("XServerScreen").e(result.exceptionOrNull(), "Failed to build Epic launch parameters")
             }
@@ -3720,17 +3846,17 @@ private fun getWineStartCommand(
         "\"wfm.exe\""
     } else {
         if (container.isLaunchBionicSteam) {
-            // Bionic-Steam mode: launch steam.exe with the game's exe path as its
-            // argument, so the Wine-side steam.exe + lsteamclient.dll handshake
-            // can attach to the native libsteamclient.so we bootstrapped.
+            // Bionic-Steam mode: launch the game executable directly.
+            // The native libsteamclient.so is already running in the Android process
+            // and will monitor the game via nativeWaitAppExit.
             val appDirPath = SteamService.getAppDirPath(gameId)
-            val gameFolderName = appDirPath.substringAfterLast('/').ifEmpty { gameId.toString() }
             val exePath = container.executablePath.ifEmpty { SteamService.getInstalledExe(gameId) }
             val normalizedExe = exePath.replace('/', '\\').trimStart('\\')
             val executableDir = appDirPath + "/" + exePath.substringBeforeLast("/", "")
             guestProgramLauncherComponent.workingDir = File(executableDir)
             Timber.i("Bionic-Steam working directory is $executableDir")
-            "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" \"C:\\\\Program Files (x86)\\\\Steam\\\\steamapps\\\\common\\\\$gameFolderName\\\\$normalizedExe\""
+            val gameFolderName = appDirPath.substringAfterLast('/').ifEmpty { gameId.toString() }
+            "\"C:\\\\Program Files (x86)\\\\Steam\\\\steamapps\\\\common\\\\$gameFolderName\\\\$normalizedExe\""
         } else if (container.isLaunchRealSteam) {
             // Launch Steam with the applaunch parameter to start the game
             "\"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe\" -silent -vgui -tcp " +
@@ -3844,10 +3970,15 @@ private fun exit(
     // down so the next launch can stand up a fresh pipe / user instead of
     // inheriting the previous session's half-dead state.
     if (container.isLaunchBionicSteam) {
-        try {
-            SteamBootstrap.stop()
-        } catch (e: Exception) {
-            Timber.e(e, "SteamBootstrap.stop() failed during exit")
+        // Launch async to avoid ANR if nativeShutdown() takes >5s
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                Timber.d("SteamBootstrap stopping...")
+                SteamBootstrap.stop()
+                Timber.d("SteamBootstrap stopped successfully")
+            } catch (e: Exception) {
+                Timber.e(e, "SteamBootstrap.stop() failed during exit")
+            }
         }
     }
 
@@ -4010,7 +4141,7 @@ private fun unpackExecutableFile(
                         try {
                             val origDll = File("${imageFs.wineprefix}/dosdevices/a:/$relDllPath")
                             if (origDll.exists()) {
-                                val genCmd = "wine z:\\generate_interfaces_file.exe A:\\" + relDllPath.replace('/', '\\')
+                                val genCmd = "wine cmd /c \"z:\\generate_interfaces_file.exe A:\\" + relDllPath.replace('/', '\\') + " & wineserver -k\""
                                 Timber.i("Running generate_interfaces_file $genCmd")
                                 val genOutput = guestProgramLauncherComponent.execShellCommand(genCmd)
 
@@ -4174,7 +4305,7 @@ private fun extractx86_64InputDlls(context: Context, container: Container) {
     } else Log.d("XServerDisplayActivity", "Wine version is not proton-9.0-x86_64, skipping input dlls extraction")
 }
 
-private fun setupWineSystemFiles(
+private suspend fun setupWineSystemFiles(
     context: Context,
     firstTimeBoot: Boolean,
     screenInfo: ScreenInfo,
@@ -4269,10 +4400,25 @@ private fun setupWineSystemFiles(
     if (openalState != container.getExtra("openal_dlls") || firstTimeBoot) {
         if (needsOpenalDlls) {
             val windowsDir = File(imageFs.rootDir, ImageFs.WINEPREFIX + "/drive_c/windows")
-            TarCompressorUtils.extract(
-                TarCompressorUtils.Type.ZSTD, context.assets,
-                "wincomponents/openal.tzst", windowsDir, onExtractFileListener,
-            )
+
+            // Download or use cached/bundled openal component
+            val openalFile = WinComponentDownloader.ensureWinComponentAvailable(context, "openal") { progress ->
+                Timber.d("Downloading openal component: ${(progress * 100).toInt()}%")
+            }
+
+            if (openalFile == null) {
+                // Legacy variant: use bundled asset
+                TarCompressorUtils.extract(
+                    TarCompressorUtils.Type.ZSTD, context.assets,
+                    "wincomponents/openal.tzst", windowsDir, onExtractFileListener,
+                )
+            } else {
+                // Modern variant: use downloaded file
+                TarCompressorUtils.extract(
+                    TarCompressorUtils.Type.ZSTD, openalFile,
+                    windowsDir, onExtractFileListener,
+                )
+            }
         }
         container.putExtra("openal_dlls", openalState)
         containerDataChanged = true
@@ -4310,7 +4456,7 @@ private fun setupWineSystemFiles(
     if (containerDataChanged) container.saveData()
 }
 
-private fun applyGeneralPatches(
+private suspend fun applyGeneralPatches(
     context: Context,
     container: Container,
     imageFs: ImageFs,
@@ -4343,10 +4489,10 @@ private fun applyGeneralPatches(
         }
     } else {
         Timber.i("Extracting container_pattern_common.tzst")
-        TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.assets, "container_pattern_common.tzst", rootDir);
+        containerManager.extractContainerPatternCommon(rootDir, onExtractFileListener)
         Timber.i("Attempting to extract _container_pattern.tzst with wine version " + container.wineVersion)
     }
-    containerManager.extractContainerPatternFile(container.getWineVersion(), contentsManager, container.rootDir, null)
+    containerManager.extractContainerPatternFile(container.wineVersion, contentsManager, container.rootDir, onExtractFileListener)
     WineUtils.applySystemTweaks(context, wineInfo)
     container.putExtra("graphicsDriver", null)
     container.putExtra("desktopTheme", null)
@@ -4359,10 +4505,85 @@ private fun applyGeneralPatches(
 }
 
 private fun refreshComponentsFiles(context: Context) {
-    TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.assets, "pulseaudio-gamenative.tzst", File(context.filesDir, "pulseaudio"))
+    val extractionPairs = listOf(
+        "pulseaudio-gamenative-20260612.tzst" to File(context.filesDir, "pulseaudio")
+    )
+
+    AssetUtils.extractComponentsWithVersionCheck(
+        extractionPairs,
+        context.assets,
+        TarCompressorUtils.Type.ZSTD
+    )
 }
 
-private fun extractDXWrapperFiles(
+/**
+ * Helper function to extract a graphics driver component, downloading if needed (modern variant)
+ * or using bundled assets (legacy variant).
+ */
+private suspend fun extractGraphicsDriverComponent(
+    context: Context,
+    componentId: String,
+    rootDir: File,
+    onExtractFileListener: OnExtractFileListener? = null
+) {
+    val componentFile = GraphicsDriverDownloader.ensureGraphicsDriverAvailable(context, componentId) { progress ->
+        Timber.d("Downloading graphics driver $componentId: ${(progress * 100).toInt()}%")
+    }
+
+    if (componentFile == null) {
+        // Legacy variant: use bundled asset
+        Timber.d("Extracting graphics driver $componentId from bundled assets")
+        TarCompressorUtils.extract(
+            TarCompressorUtils.Type.ZSTD, context.assets,
+            "graphics_driver/$componentId.tzst", rootDir, onExtractFileListener,
+        )
+    } else {
+        // Modern variant: use downloaded file
+        Timber.d("Extracting graphics driver $componentId from downloaded file: ${componentFile.absolutePath}")
+        val extractType = if (componentFile.name.endsWith(".tar.xz")) {
+            TarCompressorUtils.Type.XZ
+        } else {
+            TarCompressorUtils.Type.ZSTD
+        }
+        TarCompressorUtils.extract(
+            extractType, componentFile,
+            rootDir, onExtractFileListener,
+        )
+    }
+}
+
+/**
+ * Helper function to extract a dxwrapper component, downloading if needed (modern variant)
+ * or using bundled assets (legacy variant).
+ */
+private suspend fun extractDXWrapperComponent(
+    context: Context,
+    componentId: String,
+    windowsDir: File,
+    onExtractFileListener: OnExtractFileListener?
+) {
+    val componentFile = DXWrapperDownloader.ensureDXWrapperAvailable(context, componentId) { progress ->
+        Timber.d("Downloading dxwrapper $componentId: ${(progress * 100).toInt()}%")
+    }
+
+    if (componentFile == null) {
+        // Legacy variant: use bundled asset
+        Timber.d("Extracting dxwrapper $componentId from bundled assets")
+        TarCompressorUtils.extract(
+            TarCompressorUtils.Type.ZSTD, context.assets,
+            "dxwrapper/$componentId.tzst", windowsDir, onExtractFileListener,
+        )
+    } else {
+        // Modern variant: use downloaded file
+        Timber.d("Extracting dxwrapper $componentId from downloaded file: ${componentFile.absolutePath}")
+        TarCompressorUtils.extract(
+            TarCompressorUtils.Type.ZSTD, componentFile,
+            windowsDir, onExtractFileListener,
+        )
+    }
+}
+
+private suspend fun extractDXWrapperFiles(
     context: Context,
     firstTimeBoot: Boolean,
     container: Container,
@@ -4422,24 +4643,15 @@ private fun extractDXWrapperFiles(
                 dxvkMinVersion
             }
             Timber.i("Extracting VKD3D DX version for dxwrapper: $dxvkVersionForVkd3d")
-            TarCompressorUtils.extract(
-                TarCompressorUtils.Type.ZSTD, context.assets,
-                "dxwrapper/dxvk-${dxvkVersionForVkd3d}.tzst", windowsDir, onExtractFileListener,
-            )
+            extractDXWrapperComponent(context, "dxvk-$dxvkVersionForVkd3d", windowsDir, onExtractFileListener)
+
             if (profile != null) {
                 Timber.d("Applying user-defined VKD3D content profile: " + dxwrapper)
                 contentsManager.applyContent(profile);
             } else {
                 // Determine VKD3D version from state config
                 Timber.i("Extracting VKD3D D3D12 DLLs version: $dxwrapper")
-
-                TarCompressorUtils.extract(
-                    TarCompressorUtils.Type.ZSTD,
-                    context.assets,
-                    "dxwrapper/$dxwrapper.tzst",
-                    windowsDir,
-                    onExtractFileListener,
-                )
+                extractDXWrapperComponent(context, dxwrapper, windowsDir, onExtractFileListener)
             }
         }
         else -> {
@@ -4451,18 +4663,9 @@ private fun extractDXWrapperFiles(
                 Timber.d("Applying user-defined DXVK content profile: " + dxwrapper)
                 contentsManager.applyContent(profile);
             } else {
-                TarCompressorUtils.extract(
-                    TarCompressorUtils.Type.ZSTD, context.assets,
-                    "dxwrapper/$dxwrapper.tzst", windowsDir, onExtractFileListener,
-                )
+                extractDXWrapperComponent(context, dxwrapper, windowsDir, onExtractFileListener)
             }
-            TarCompressorUtils.extract(
-                TarCompressorUtils.Type.ZSTD,
-                context.assets,
-                "dxwrapper/d8vk-${DefaultVersion.D8VK}.tzst",
-                windowsDir,
-                onExtractFileListener,
-            )
+            extractDXWrapperComponent(context, "d8vk-${DefaultVersion.D8VK}", windowsDir, onExtractFileListener)
         }
     }
 }
@@ -4546,7 +4749,7 @@ private fun restoreOriginalDllFiles(
         }
     }
 }
-private fun extractWinComponentFiles(
+private suspend fun extractWinComponentFiles(
     context: Context,
     firstTimeBoot: Boolean,
     imageFs: ImageFs,
@@ -4592,10 +4795,28 @@ private fun extractWinComponentFiles(
             if (!container.wineVersion.contains("arm64ec") && identifier.contains("opengl") && useNative) continue
 
             if (useNative) {
-                TarCompressorUtils.extract(
-                    TarCompressorUtils.Type.ZSTD, context.assets,
-                    "wincomponents/$identifier.tzst", windowsDir, onExtractFileListener,
-                )
+                // Download or use cached/bundled wincomponent
+                val componentFile = WinComponentDownloader.ensureWinComponentAvailable(
+                    context, identifier
+                ) { progress ->
+                    Timber.d("Downloading wincomponent $identifier: ${(progress * 100).toInt()}%")
+                }
+
+                if (componentFile == null) {
+                    // Legacy variant: use bundled asset
+                    Timber.d("Extracting wincomponent $identifier from bundled assets")
+                    TarCompressorUtils.extract(
+                        TarCompressorUtils.Type.ZSTD, context.assets,
+                        "wincomponents/$identifier.tzst", windowsDir, onExtractFileListener,
+                    )
+                } else {
+                    // Modern variant: use downloaded file
+                    Timber.d("Extracting wincomponent $identifier from downloaded file: ${componentFile.absolutePath}")
+                    TarCompressorUtils.extract(
+                        TarCompressorUtils.Type.ZSTD, componentFile,
+                        windowsDir, onExtractFileListener,
+                    )
+                }
             } else {
                 val dlnames = wincomponentsJSONObject.getJSONArray(identifier)
                 for (i in 0 until dlnames.length()) {
@@ -4613,7 +4834,7 @@ private fun extractWinComponentFiles(
     }
 }
 
-private fun extractGraphicsDriverFiles(
+private suspend fun extractGraphicsDriverFiles(
     context: Context,
     graphicsDriver: String,
     dxwrapper: String,
@@ -4637,12 +4858,13 @@ private fun extractGraphicsDriverFiles(
         var cacheId = graphicsDriver
         if (graphicsDriver == "turnip") {
             cacheId += "-" + turnipVersion + "-" + zinkVersion
-            if (turnipVersion == "25.2.0" || turnipVersion == "25.3.0") {
-                if (GPUInformation.isAdreno710_720_732(context)) {
-                    envVars.put("TU_DEBUG", "gmem");
-                } else {
-                    envVars.put("TU_DEBUG", "sysmem");
-                }
+            if (GPUInformation.isAdreno710_720_732(context)) {
+                val userEnvVars = EnvVars(container.envVars)
+                val tuDebug = userEnvVars.get("TU_DEBUG")
+                if (!tuDebug.contains("gmem")) userEnvVars.put("TU_DEBUG", (if (!tuDebug.isEmpty()) "$tuDebug," else "") + "gmem")
+                container.envVars = userEnvVars.toString()
+            } else if (turnipVersion == "25.2.0" || turnipVersion == "25.3.0") {
+                envVars.put("TU_DEBUG", "sysmem");
             }
         } else if (graphicsDriver == "virgl") {
             cacheId += "-" + DefaultVersion.VIRGL
@@ -4697,18 +4919,8 @@ private fun extractGraphicsDriverFiles(
             }
 
             if (changed) {
-                TarCompressorUtils.extract(
-                    TarCompressorUtils.Type.ZSTD,
-                    context.assets,
-                    "graphics_driver/turnip-${turnipVersion}.tzst",
-                    rootDir,
-                )
-                TarCompressorUtils.extract(
-                    TarCompressorUtils.Type.ZSTD,
-                    context.assets,
-                    "graphics_driver/zink-${zinkVersion}.tzst",
-                    rootDir,
-                )
+                extractGraphicsDriverComponent(context, "turnip-$turnipVersion", rootDir)
+                extractGraphicsDriverComponent(context, "zink-$zinkVersion", rootDir)
             }
         } else if (graphicsDriver == "virgl") {
             envVars.put("GALLIUM_DRIVER", "virpipe")
@@ -4718,10 +4930,7 @@ private fun extractGraphicsDriverFiles(
             envVars.put("MESA_GL_VERSION_OVERRIDE", "3.1")
             envVars.put("vblank_mode", "0")
             if (changed) {
-                TarCompressorUtils.extract(
-                    TarCompressorUtils.Type.ZSTD, context.assets,
-                    "graphics_driver/virgl-${virglVersion}.tzst", rootDir,
-                )
+                extractGraphicsDriverComponent(context, "virgl-$virglVersion", rootDir)
             }
         } else if (graphicsDriver == "vortek") {
             Timber.i("Setting Vortek env vars")
@@ -4735,8 +4944,8 @@ private fun extractGraphicsDriverFiles(
                 envVars.put("WINE_D3D_CONFIG", "renderer=gdi")
             }
             if (changed) {
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.assets, "graphics_driver/vortek-2.1.tzst", rootDir)
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.assets, "graphics_driver/zink-22.2.5.tzst", rootDir)
+                extractGraphicsDriverComponent(context, "vortek-2.1", rootDir)
+                extractGraphicsDriverComponent(context, "zink-22.2.5", rootDir)
             }
         } else if (graphicsDriver == "adreno" || graphicsDriver == "sd-8-elite") {
             val assetZip = if (graphicsDriver == "adreno") "Adreno_${adrenoVersion}_adpkg.zip" else "SD8Elite_${sd8EliteVersion}.zip"
@@ -4746,8 +4955,19 @@ private fun extractGraphicsDriverFiles(
                 context,
             )
 
+            // Download or get cached core driver
+            val driverFile = CoreDriverDownloader.ensureCoreDriverAvailable(context, assetZip) { progress ->
+                Timber.d("Downloading core driver $assetZip: ${(progress * 100).toInt()}%")
+            }
+
             // Read manifest name from zip to determine folder name
-            val identifier = readZipManifestNameFromAssets(context, assetZip) ?: assetZip.substringBeforeLast('.')
+            val identifier = if (driverFile != null) {
+                // Modern variant: read from downloaded file
+                com.winlator.core.FileUtils.readZipManifestNameFromFile(driverFile) ?: assetZip.substringBeforeLast('.')
+            } else {
+                // Legacy variant: read from assets
+                readZipManifestNameFromAssets(context, assetZip) ?: assetZip.substringBeforeLast('.')
+            }
 
             // Only (re)extract if changed
             val adrenoCacheId = "${graphicsDriver}-${identifier}"
@@ -4759,7 +4979,16 @@ private fun extractGraphicsDriverFiles(
                     FileUtils.delete(destinationDir)
                 }
                 destinationDir.mkdirs()
-                com.winlator.core.FileUtils.extractZipFromAssets(context, assetZip, destinationDir)
+
+                if (driverFile != null) {
+                    // Modern variant: extract from downloaded file
+                    Timber.d("Extracting core driver from downloaded file: ${driverFile.absolutePath}")
+                    com.winlator.core.FileUtils.extractZipFromFile(driverFile, destinationDir)
+                } else {
+                    // Legacy variant: extract from assets
+                    Timber.d("Extracting core driver from bundled assets: $assetZip")
+                    com.winlator.core.FileUtils.extractZipFromAssets(context, assetZip, destinationDir)
+                }
 
                 val targetLibName = "vulkan.adreno.so"
 
@@ -4777,8 +5006,8 @@ private fun extractGraphicsDriverFiles(
                 envVars.put("WINE_D3D_CONFIG", "renderer=gdi")
             }
             if (changed) {
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.assets, "graphics_driver/vortek-2.1.tzst", rootDir)
-                TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.assets, "graphics_driver/zink-22.2.5.tzst", rootDir)
+                extractGraphicsDriverComponent(context, "vortek-2.1", rootDir)
+                extractGraphicsDriverComponent(context, "zink-22.2.5", rootDir)
             }
         }
     } else {
@@ -4831,28 +5060,24 @@ private fun extractGraphicsDriverFiles(
         if (ALWAYS_REEXTRACT || firstTimeBoot || mainWrapperSelection != lastInstalledMainWrapper) {
             // We only extract if the selection is actually a wrapper file.
             if (mainWrapperSelection.lowercase(Locale.getDefault()).startsWith("wrapper")) {
-                val assetPath = "graphics_driver/" + mainWrapperSelection.lowercase(Locale.getDefault()) + ".tzst"
-                Log.d("GraphicsDriverExtraction", "WRAPPER selection changed or first boot. Extracting: " + assetPath)
-                val success: Boolean = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, context.getAssets(), assetPath, rootDir)
-                if (success) {
+                val wrapperComponentId = mainWrapperSelection.lowercase(Locale.getDefault())
+                Log.d("GraphicsDriverExtraction", "WRAPPER selection changed or first boot. Extracting: $wrapperComponentId")
+                try {
+                    extractGraphicsDriverComponent(context, wrapperComponentId, rootDir!!)
                     // After success, save the new version so we don't re-extract next time.
                     container.putExtra("lastInstalledMainWrapper", mainWrapperSelection)
                     container.saveData()
+                } catch (e: Exception) {
+                    Log.e("GraphicsDriverExtraction", "Failed to extract wrapper: ${e.message}")
                 }
                 Log.d("XServerDisplayActivity", "First time container boot, extracting extra_libs.tzst")
-                TarCompressorUtils.extract(
-                    TarCompressorUtils.Type.ZSTD,
-                    context.getAssets(),
-                    "graphics_driver/extra_libs.tzst",
-                    rootDir,
-                )
+                extractGraphicsDriverComponent(context, "extra_libs", rootDir!!)
                 val renderer = GPUInformation.getRenderer(null, null)
                 if (container.wineVersion.contains("arm64ec") && renderer?.contains("Mali") != true) {
-                    TarCompressorUtils.extract(
-                        TarCompressorUtils.Type.ZSTD,
-                        context.assets,
-                        "graphics_driver/zink_dlls" + ".tzst",
-                        File(rootDir, ImageFs.WINEPREFIX + "/drive_c/windows"),
+                    extractGraphicsDriverComponent(
+                        context,
+                        "zink_dlls",
+                        File(rootDir, ImageFs.WINEPREFIX + "/drive_c/windows")
                     )
                 }
             }
@@ -5024,8 +5249,9 @@ private fun extractSteamFiles(
     }
 
     // Real-Steam mode: extract the full real-Steam tree once; subsequent boots
-    // reuse what's already on disk.
-    if (steamExe.exists()) return
+    val bionicSteamExe = File(imageFs.getFilesDir(), "steam.exe")
+    val installedIsBionic = bionicSteamExe.exists() && FileUtils.contentEquals(steamExe, bionicSteamExe)
+    if (steamExe.exists() && !installedIsBionic) return
 
     val downloaded = File(imageFs.getFilesDir(), "steam.tzst")
     Timber.i("Extracting steam.tzst")
