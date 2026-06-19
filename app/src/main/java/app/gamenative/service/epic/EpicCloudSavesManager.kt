@@ -1263,7 +1263,7 @@ object EpicCloudSavesManager {
         }
 
         // Resolve against on-disk casing to avoid creating duplicate dirs (e.g. locallow vs LocalLow).
-        val joinedPath = canonicalizeAppDataSegments(normalizedParts).joinToString("/")
+        val joinedPath = normalizedParts.joinToString("/")
         val resolved = FileUtils.resolveCaseInsensitive(File("/"), joinedPath)
         // guard against path traversal escaping the wine prefix
         val absPath = resolved.absolutePath
@@ -1320,22 +1320,6 @@ object EpicCloudSavesManager {
         Timber.tag("Epic").d("[Cloud Saves]   Resolved: ${actualPath.absolutePath}")
 
         return actualPath
-    }
-
-    // Fixes issue where saves were being lost due to inconsistencies in lower-case sub-folders in AppData
-    internal fun canonicalizeAppDataSegments(segments: List<String>): List<String> {
-        return segments.mapIndexed { index, segment ->
-            if (index > 0 && segments[index - 1].equals("AppData", ignoreCase = true)) {
-                when (segment.lowercase()) {
-                    "local" -> "Local"
-                    "locallow" -> "LocalLow"
-                    "roaming" -> "Roaming"
-                    else -> segment
-                }
-            } else {
-                segment
-            }
-        }
     }
 
     private fun getSyncTimestamp(context: Context, appId: Int): String? {

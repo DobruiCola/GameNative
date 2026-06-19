@@ -111,15 +111,6 @@ class EpicCloudSavesTest {
     }
 
     @Test
-    fun `AppData child segments are canonicalized before creating save paths`() {
-        val segments = listOf("data", "prefix", "AppData", "locallow", "ZAUM Studio")
-
-        val canonicalized = EpicCloudSavesManager.canonicalizeAppDataSegments(segments)
-
-        assertEquals(listOf("data", "prefix", "AppData", "LocalLow", "ZAUM Studio"), canonicalized)
-    }
-
-    @Test
     fun `CustomFields round-trips through write then read`() {
         val original = CustomFields()
         original["CloudSaveFolder"] = "{AppData}/nuclearthrone/"
