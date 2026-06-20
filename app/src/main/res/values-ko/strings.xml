@@ -1554,6 +1554,7 @@
     <string name="screen_effects_scaling_mode_dls_desc">샤픈/선명도 패스.</string>
     <string name="screen_effects_scaling_mode_natural">자연</string>
     <string name="screen_effects_scaling_mode_natural_desc">더 따뜻한 색조.</string>
+    <string name="settings_interface_settingslistdropdownsearchable_searchlabel">찾다</string>
     <string name="screen_effects_fsr">FSR 1.0</string>
     <string name="screen_effects_fsr_description">공식 AMD FidelityFX Super Resolution 1.0입니다. EASU + RCAS를 사용해 낮은 내부 해상도로 렌더링한 뒤 전체 해상도로 업스케일합니다.</string>
     <string name="screen_effects_fsr_quality">FSR 품질</string>

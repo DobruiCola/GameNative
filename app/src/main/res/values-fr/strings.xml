@@ -1008,6 +1008,7 @@
     <!-- Generic/Reusable strings -->
     <string name="continue_action">Continuer</string>
     <string name="settings_text">Paramètres</string>
+    <string name="settings_interface_settingslistdropdownsearchable_searchlabel">Rechercher</string>
 
 
     <!-- Connecting to Servers Screen -->
