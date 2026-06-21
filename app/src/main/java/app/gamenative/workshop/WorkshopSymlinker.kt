@@ -41,6 +41,7 @@ class WorkshopSymlinker {
         activeItemDirs: Map<Long, File>,
         workshopContentBase: File,
         itemTitles: Map<Long, String> = emptyMap(),
+        useIdNames: Boolean = false,
     ): SyncResult {
         return when (strategy) {
             is WorkshopModPathStrategy.Standard -> {
@@ -48,9 +49,9 @@ class WorkshopSymlinker {
                 SyncResult(0, activeItemDirs.size, 0, emptyMap())
             }
             is WorkshopModPathStrategy.SymlinkIntoDir ->
-                syncIntoAllDirs(strategy.effectiveDirs, activeItemDirs, workshopContentBase, true, itemTitles)
+                syncIntoAllDirs(strategy.effectiveDirs, activeItemDirs, workshopContentBase, true, itemTitles, useIdNames)
             is WorkshopModPathStrategy.CopyIntoDir ->
-                syncIntoAllDirs(strategy.effectiveDirs, activeItemDirs, workshopContentBase, false, itemTitles)
+                syncIntoAllDirs(strategy.effectiveDirs, activeItemDirs, workshopContentBase, false, itemTitles, useIdNames)
         }
     }
 
@@ -63,12 +64,13 @@ class WorkshopSymlinker {
         workshopContentBase: File,
         useSymlinks: Boolean,
         itemTitles: Map<Long, String> = emptyMap(),
+        useIdNames: Boolean = false,
     ): SyncResult {
         var totalCreated = 0; var totalSkipped = 0; var totalRemoved = 0
         val allErrors = mutableMapOf<String, String>()
 
         for (dir in targetDirs) {
-            val r = syncIntoOneDir(dir, activeItemDirs, workshopContentBase, useSymlinks, itemTitles)
+            val r = syncIntoOneDir(dir, activeItemDirs, workshopContentBase, useSymlinks, itemTitles, useIdNames)
             totalCreated += r.created; totalSkipped += r.skipped; totalRemoved += r.removed
             r.errors.forEach { (k, v) -> allErrors["${dir.name}/$k"] = v }
         }
@@ -86,6 +88,7 @@ class WorkshopSymlinker {
         workshopContentBase: File,
         useSymlinks: Boolean,
         itemTitles: Map<Long, String> = emptyMap(),
+        useIdNames: Boolean = false,
     ): SyncResult {
         Timber.tag(TAG).i(
             "syncIntoOneDir: ${targetDir.absolutePath} " +
@@ -137,7 +140,11 @@ class WorkshopSymlinker {
         val entryNameForId = mutableMapOf<Long, String>()
         for (id in activeItemDirs.keys.sorted()) {
             val title = itemTitles[id]
-            val baseName = if (!title.isNullOrBlank()) sanitizeFileName(title) else id.toString()
+            val baseName = when {
+                useIdNames -> id.toString()
+                !title.isNullOrBlank() -> sanitizeFileName(title)
+                else -> id.toString()
+            }
             var candidate = baseName
             if (candidate in usedNames) candidate = "${baseName}_$id"
             var counter = 1
