@@ -39,6 +39,7 @@
     <string name="steam_uninstall_confirmation_message">您確定要卸載 %1$s 嗎? 此操作無法撤回</string>
     <string name="steam_uninstall_success">%1$s 已卸載</string>
     <string name="steam_uninstall_failed">卸載遊戲失敗</string>
+    <string name="deleting">正在刪除…</string>
     <string name="amazon_uninstall_game_title">卸載遊戲</string>
     <string name="amazon_uninstall_confirmation_message">您確定要卸載 %1$s 嗎? 此操作無法撤回</string>
     <string name="amazon_install_game_title">下載遊戲</string>
@@ -199,6 +200,8 @@
     <!-- Winlator: Win Components -->
     <string name="direct3d">Direct3D</string>
     <string name="directsound">DirectSound</string>
+    <string name="directinput8">DirectInput 8</string>
+    <string name="directinput">DirectInput</string>
     <string name="directmusic">DirectMusic</string>
     <string name="directplay">DirectPlay</string>
     <string name="directshow">DirectShow</string>
@@ -277,6 +280,7 @@
     <string name="open_navigation_menu">開啟導航選單</string>
     <string name="quick_menu_title">快捷選單</string>
     <string name="quick_menu_back">返回</string>
+    <string name="display_brightness">顯示亮度</string>
     <string name="screen_effects">螢幕效果</string>
     <string name="screen_effects_live_preview">變更會立即套用到目前遊戲。</string>
     <string name="screen_effects_color_adjustments">色彩調整</string>
@@ -1004,7 +1008,7 @@
     <!-- Generic/Reusable strings -->
     <string name="continue_action">繼續</string>
     <string name="settings_text">設定</string>
-
+    <string name="settings_interface_settingslistdropdownsearchable_searchlabel">搜尋</string>
 
     <!-- Connecting to Servers Screen -->
     <string name="connect_to_remote_server">正在連接至遠端伺服器...</string>

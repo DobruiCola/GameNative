@@ -40,6 +40,7 @@
     <string name="steam_uninstall_confirmation_message">Sei sicuro di voler disinstallare %1$s? Questa azione non può essere annullata.</string>
     <string name="steam_uninstall_success">%1$s è stato disinstallato</string>
     <string name="steam_uninstall_failed">Impossibile disinstallare il gioco</string>
+    <string name="deleting">Eliminazione…</string>
     <string name="amazon_uninstall_game_title">Disinstalla gioco</string>
     <string name="amazon_uninstall_confirmation_message">Sei sicuro di voler disinstallare %1$s? Questa azione non può essere annullata.</string>
     <string name="amazon_install_game_title">Scarica gioco</string>
@@ -201,6 +202,8 @@
     <!-- Winlator: Win Components -->
     <string name="direct3d">Direct3D</string>
     <string name="directsound">DirectSound</string>
+    <string name="directinput8">DirectInput 8</string>
+    <string name="directinput">DirectInput</string>
     <string name="directmusic">DirectMusic</string>
     <string name="directplay">DirectPlay</string>
     <string name="directshow">DirectShow</string>
@@ -283,6 +286,7 @@
     <string name="open_navigation_menu">Apri Menu Navigazione</string>
     <string name="quick_menu_title">Menu rapido</string>
     <string name="quick_menu_back">Indietro</string>
+    <string name="display_brightness">Luminosità display</string>
     <string name="screen_effects">Effetti schermo</string>
     <string name="screen_effects_live_preview">Le modifiche si applicano istantaneamente al gioco corrente.</string>
     <string name="screen_effects_color_adjustments">Regolazioni colore</string>
@@ -1004,7 +1008,7 @@
     <!-- Generic/Reusable strings -->
     <string name="continue_action">Continua</string>
     <string name="settings_text">Impostazioni</string>
-
+    <string name="settings_interface_settingslistdropdownsearchable_searchlabel">Cerca</string>
 
     <!-- Connecting to Servers Screen -->
     <string name="connect_to_remote_server">Connessione ai server remoti...</string>

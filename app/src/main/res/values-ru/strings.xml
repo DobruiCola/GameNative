@@ -307,6 +307,8 @@
     <string name="directplay">DirectPlay</string>
     <string name="directshow">DirectShow</string>
     <string name="directsound">DirectSound</string>
+    <string name="directinput8">DirectInput 8</string>
+    <string name="directinput">DirectInput</string>
     <string name="directx">DirectX</string>
     <string name="disable_mouse_input">Отключить ввод мыши</string>
     <string name="disable_present_wait">Отключить KHR_present_wait</string>
@@ -872,6 +874,7 @@ https://gamenative.app
     <string name="properties">Свойства</string>
     <string name="quick_menu_back">Назад</string>
     <string name="quick_menu_title">Быстрое меню</string>
+    <string name="display_brightness">Яркость дисплея</string>
     <string name="screen_effects">Эффекты экрана</string>
     <string name="screen_effects_live_preview">Изменения мгновенно применяются к текущей игре.</string>
     <string name="screen_effects_color_adjustments">Настройка цвета</string>
@@ -1074,6 +1077,7 @@ https://gamenative.app
     <string name="settings_select_language">Выберите язык</string>
     <string name="settings_subtitle">Настройте ваш опыт</string>
     <string name="settings_text">Настройки</string>
+    <string name="settings_interface_settingslistdropdownsearchable_searchlabel">искать</string>
     <string name="settings_theme_alternate">Альтернативная</string>
     <string name="settings_theme_default">По умолчанию</string>
     <string name="settings_title">Настройки</string>
@@ -1154,6 +1158,7 @@ https://gamenative.app
     <string name="steam_type">Тип Steam</string>
     <string name="steam_uninstall_confirmation_message">Вы уверены, что хотите удалить %1$s? Это действие не может быть отменено.</string>
     <string name="steam_uninstall_failed">Ошибка удаления игры</string>
+    <string name="deleting">Удаление…</string>
     <string name="steam_uninstall_game_title">Удалить игру</string>
     <string name="steam_uninstall_success">%1$s была удалена</string>
     <string name="steam_update_message">Пожалуйста, убедитесь, что ваши сохранения загружены в облако или скопированы, поскольку они могут быть перезаписаны.</string>

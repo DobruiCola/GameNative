@@ -1309,7 +1309,7 @@ class SteamService : Service(), IChallengeUrlChanged {
             return container.executablePath.ifEmpty { getInstalledExe(gameId) }
         }
 
-        fun deleteApp(appId: Int): Boolean {
+        suspend fun deleteApp(appId: Int): Boolean = withContext(Dispatchers.IO) {
             // snapshot path before marker removal (removing the marker changes resolution)
             val appInfo = getInstalledApp(appId)
             val result = if (appInfo?.isImported == true) {
@@ -1338,27 +1338,25 @@ class SteamService : Service(), IChallengeUrlChanged {
             // Remove from DB
             workshopPausedApps.remove(appId)
             with(instance!!) {
-                scope.launch {
-                    db.withTransaction {
-                        appInfoDao.deleteApp(appId)
-                        changeNumbersDao.deleteByAppId(appId)
-                        fileChangeListsDao.deleteByAppId(appId)
-                        steamFileHashCacheDao.deleteByAppId(appId)
-                        downloadingAppInfoDao.deleteApp(appId)
-                        appDao.clearWorkshopState(appId)
+                db.withTransaction {
+                    appInfoDao.deleteApp(appId)
+                    changeNumbersDao.deleteByAppId(appId)
+                    fileChangeListsDao.deleteByAppId(appId)
+                    steamFileHashCacheDao.deleteByAppId(appId)
+                    downloadingAppInfoDao.deleteApp(appId)
+                    appDao.clearWorkshopState(appId)
 
-                        val indirectDlcAppIds = getDownloadableDlcAppsOf(appId).orEmpty().map { it.id }
-                        indirectDlcAppIds.forEach { dlcAppId ->
-                            appInfoDao.deleteApp(dlcAppId)
-                            changeNumbersDao.deleteByAppId(dlcAppId)
-                            fileChangeListsDao.deleteByAppId(dlcAppId)
-                            steamFileHashCacheDao.deleteByAppId(dlcAppId)
-                        }
+                    val indirectDlcAppIds = getDownloadableDlcAppsOf(appId).orEmpty().map { it.id }
+                    indirectDlcAppIds.forEach { dlcAppId ->
+                        appInfoDao.deleteApp(dlcAppId)
+                        changeNumbersDao.deleteByAppId(dlcAppId)
+                        fileChangeListsDao.deleteByAppId(dlcAppId)
+                        steamFileHashCacheDao.deleteByAppId(dlcAppId)
                     }
                 }
             }
 
-            return result
+            return@withContext result
         }
 
         fun downloadApp(appId: Int): DownloadInfo? {

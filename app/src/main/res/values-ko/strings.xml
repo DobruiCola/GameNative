@@ -40,6 +40,7 @@
     <string name="steam_uninstall_confirmation_message">%1$s을(를) 제거하시겠습니까? 이 작업은 취소할 수 없습니다.</string>
     <string name="steam_uninstall_success">%1$s이(가) 제거되었습니다</string>
     <string name="steam_uninstall_failed">게임 제거 실패</string>
+    <string name="deleting">삭제 중…</string>
     <string name="amazon_uninstall_game_title">게임 제거</string>
     <string name="amazon_uninstall_confirmation_message">%1$s을(를) 제거하시겠습니까? 이 작업은 취소할 수 없습니다.</string>
     <string name="amazon_install_game_title">게임 다운로드</string>
@@ -210,6 +211,8 @@
     <!-- Winlator: Win Components -->
     <string name="direct3d">Direct3D</string>
     <string name="directsound">DirectSound</string>
+    <string name="directinput8">DirectInput 8</string>
+    <string name="directinput">DirectInput</string>
     <string name="directmusic">DirectMusic</string>
     <string name="directplay">DirectPlay</string>
     <string name="directshow">DirectShow</string>
@@ -292,6 +295,7 @@
     <string name="open_navigation_menu">탐색 메뉴 열기</string>
     <string name="quick_menu_title">빠른 메뉴</string>
     <string name="quick_menu_back">뒤로</string>
+    <string name="display_brightness">디스플레이 밝기</string>
     <string name="screen_effects">화면 효과</string>
     <string name="screen_effects_live_preview">변경 사항이 현재 게임에 즉시 적용됩니다.</string>
     <string name="screen_effects_color_adjustments">색상 조정</string>
@@ -1554,6 +1558,7 @@
     <string name="screen_effects_scaling_mode_dls_desc">샤픈/선명도 패스.</string>
     <string name="screen_effects_scaling_mode_natural">자연</string>
     <string name="screen_effects_scaling_mode_natural_desc">더 따뜻한 색조.</string>
+    <string name="settings_interface_settingslistdropdownsearchable_searchlabel">찾다</string>
     <string name="screen_effects_fsr">FSR 1.0</string>
     <string name="screen_effects_fsr_description">공식 AMD FidelityFX Super Resolution 1.0입니다. EASU + RCAS를 사용해 낮은 내부 해상도로 렌더링한 뒤 전체 해상도로 업스케일합니다.</string>
     <string name="screen_effects_fsr_quality">FSR 품질</string>
