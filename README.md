@@ -1,6 +1,6 @@
 <div align="center">
 
-# GameNative
+# GameNatives
 
 **Play the PC games you already own — from Steam, Epic and GOG — on your Android device, with cloud saves.**
 
